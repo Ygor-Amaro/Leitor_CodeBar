@@ -75,5 +75,3 @@ uv run pytest -k modulo_11               # um caso
 uv run ruff check .                      # lint
 uv run ruff check . --fix                # lint com correção automática
 ```
-
-A arquitetura está descrita em [CLAUDE.md](CLAUDE.md).
