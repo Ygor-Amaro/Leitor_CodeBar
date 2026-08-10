@@ -20,6 +20,8 @@ TAMANHO_LINHA_ARRECADACAO = 48
 # 3º dígito do código de arrecadação: identificação de valor efetivo ou
 # referência. 6 e 7 usam Módulo 10; 8 e 9 usam Módulo 11.
 IDENTIFICADORES_MODULO_10 = frozenset({"6", "7"})
+IDENTIFICADORES_MODULO_11 = frozenset({"8", "9"})
+IDENTIFICADORES_VALIDOS = IDENTIFICADORES_MODULO_10 | IDENTIFICADORES_MODULO_11
 
 
 class TipoDocumento(StrEnum):
@@ -61,6 +63,20 @@ class CodigoBarras:
         return self.digitos[2]
 
     @property
+    def identificador_valor_valido(self) -> bool:
+        """Só restringe arrecadação — em cobrança o 3º dígito não tem esse papel.
+
+        Fora de 6/7/8/9 não dá para saber qual Módulo o emissor usou: a
+        `calculadora_arrecadacao` chuta o de 11, e o DV geral passa a ser
+        conferido pelo mesmo chute — logo, não detecta o próprio erro. Daí a
+        checagem precisar ser explícita.
+        """
+        return (
+            self.tipo is not TipoDocumento.ARRECADACAO
+            or self.identificador_valor in IDENTIFICADORES_VALIDOS
+        )
+
+    @property
     def calculadora_arrecadacao(self) -> CalculadoraDV:
         if self.identificador_valor in IDENTIFICADORES_MODULO_10:
             return MODULO_10
@@ -87,6 +103,21 @@ class CodigoBarras:
             calculadora = MODULO_11_COBRANCA
 
         return calculadora.calcular(base) == self.dv_geral
+
+    def motivo_de_desconfianca(self) -> str | None:
+        """Por que esta leitura não merece confiança, ou None se estiver coerente.
+
+        Consultivo, como o `dv_geral_confere`: quem chama sinaliza a linha para
+        conferência manual, nunca a descarta.
+        """
+        if not self.identificador_valor_valido:
+            return (
+                f"Identificador de valor '{self.identificador_valor}' fora do "
+                "padrão (esperado 6, 7, 8 ou 9)"
+            )
+        if not self.dv_geral_confere():
+            return "DV geral não confere"
+        return None
 
     def __str__(self) -> str:
         return self.digitos
@@ -153,7 +184,7 @@ class ResultadoLeitura:
         codigo: CodigoBarras,
         linha: LinhaDigitavel,
     ) -> ResultadoLeitura:
-        dv_ok = codigo.dv_geral_confere()
+        motivo = codigo.motivo_de_desconfianca()
         return cls(
             arquivo=arquivo,
             pagina=pagina,
@@ -161,8 +192,8 @@ class ResultadoLeitura:
             tipo=codigo.tipo,
             codigo_barras=codigo.digitos,
             linha_digitavel=linha.digitos,
-            dv_ok=dv_ok,
-            observacao="" if dv_ok else "DV geral não confere — conferir manualmente",
+            dv_ok=motivo is None,
+            observacao="" if motivo is None else f"{motivo} — conferir manualmente",
         )
 
     @classmethod

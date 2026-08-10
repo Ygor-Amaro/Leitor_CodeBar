@@ -2,6 +2,8 @@
 
 import csv
 
+import pytest
+
 from leitor_cb.domain import CodigoBarras, FabricaConversor, PixPayload, ResultadoLeitura
 from leitor_cb.services import ExportadorConsole, ExportadorCsv
 from leitor_cb.services.exportador import COLUNAS
@@ -72,6 +74,69 @@ class TestExportadorCsv:
         assert primeiro.name.startswith("lote_")
         assert primeiro.suffix == ".csv"
 
+    def test_dois_lotes_no_mesmo_segundo_convivem(self, tmp_path):
+        """O carimbo tem resolução de segundos; sem sufixo, o 1º relatório sumiria."""
+        exportador = ExportadorCsv(tmp_path, prefixo="lote")
+        primeiro = exportador.exportar(resultados_de_exemplo())
+        segundo = exportador.exportar(resultados_de_exemplo())
+
+        assert primeiro != segundo
+        assert primeiro.exists() and segundo.exists()
+        assert len(list(tmp_path.glob("lote_*.csv"))) == 2
+
+
+class TestInjecaoDeFormula:
+    """O CSV é feito para abrir no Excel e o conteúdo vem de dentro do PDF."""
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "=cmd|'/c calc'!A1",
+            "+1+1",
+            "-1+1",
+            "@SUM(1+1)",
+            "\t=1+1",
+            "\r=1+1",
+        ],
+    )
+    def test_payload_pix_perigoso_e_neutralizado(self, tmp_path, payload):
+        arquivo = ExportadorCsv(tmp_path).exportar(
+            [ResultadoLeitura.de_pix("nota.pdf", 1, PixPayload(payload))]
+        )
+        linha = ler_csv(arquivo)[0]
+
+        assert linha["linha_digitavel"] == f"'{payload}"
+        assert not linha["linha_digitavel"].startswith(("=", "+", "-", "@", "\t", "\r"))
+
+    def test_nome_de_arquivo_perigoso_e_neutralizado(self, tmp_path):
+        malicioso = '=HYPERLINK("http://evil","clique")'
+        arquivo = ExportadorCsv(tmp_path).exportar(
+            [ResultadoLeitura.sem_codigo(f"{malicioso}.pdf", 1)]
+        )
+
+        assert ler_csv(arquivo)[0]["arquivo"] == f"'{malicioso}.pdf"
+
+    def test_codigo_de_barras_ilegivel_e_neutralizado(self, tmp_path):
+        arquivo = ExportadorCsv(tmp_path).exportar(
+            [ResultadoLeitura.invalido("nota.pdf", 1, "=1+1", "tamanho inválido")]
+        )
+
+        assert ler_csv(arquivo)[0]["codigo_barras"] == "'=1+1"
+
+    def test_conteudo_legitimo_nao_e_alterado(self, tmp_path):
+        arquivo = ExportadorCsv(tmp_path).exportar(resultados_de_exemplo())
+        boleto, pix = ler_csv(arquivo)[0], ler_csv(arquivo)[1]
+
+        assert boleto["codigo_barras"] == f"\t{BOLETO}"  # só o prefixo numérico
+        assert pix["linha_digitavel"] == "00020126580014BR.GOV.BCB.PIX"
+
+    def test_prefixo_de_tabulacao_sai_entre_aspas(self, tmp_path):
+        """Sem aspas o TAB fica solto no arquivo e a proteção não é confiável."""
+        arquivo = ExportadorCsv(tmp_path).exportar(resultados_de_exemplo())
+        primeira_linha = arquivo.read_text(encoding="utf-8-sig").splitlines()[1]
+
+        assert f'"\t{BOLETO}"' in primeira_linha
+
 
 class TestExportadorConsole:
     def test_imprime_cada_status_sem_quebrar(self, capsys):
@@ -103,4 +168,14 @@ class TestExportadorConsole:
             ResultadoLeitura.de_boleto("a.pdf", 1, corrompido, linha)
         )
 
-        assert "DV GERAL NAO CONFERE" in capsys.readouterr().out
+        assert "DV geral não confere" in capsys.readouterr().out
+
+    def test_identificador_invalido_ganha_alerta_proprio(self, capsys):
+        """O operador precisa saber qual conferência falhou, não só que falhou."""
+        codigo = CodigoBarras("8117" + "0" * 40)
+        linha = FabricaConversor().converter(codigo)
+        ExportadorConsole().imprimir(ResultadoLeitura.de_boleto("a.pdf", 1, codigo, linha))
+
+        saida = capsys.readouterr().out
+        assert "Identificador de valor" in saida
+        assert "DV geral" not in saida

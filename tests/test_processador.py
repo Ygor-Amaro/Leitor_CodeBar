@@ -143,6 +143,48 @@ class TestLeituraAutomatica:
 
 
 class TestZoomProgressivo:
+    def test_ruido_no_primeiro_zoom_nao_interrompe_a_escalada(self):
+        """Ler um ITF qualquer não é ter achado o boleto.
+
+        Nota fiscal costuma trazer código de rastreio legível no zoom baixo; se
+        a escalada parasse nele, o boleto que só sai no zoom alto se perderia.
+        """
+        renderizador = RenderizadorFalso(DocumentoFalso())
+        processador = ProcessadorDocumento(
+            renderizador=renderizador,
+            decodificador=DecodificadorFalso([itf("99887766")], [itf(BOLETO)]),
+            zooms=(2.0, 3.0),
+        )
+
+        (resultado,) = processador.processar("lote.pdf")
+
+        assert renderizador.documento.renderizacoes == [(0, 2.0), (0, 3.0)]
+        assert resultado.status is StatusLeitura.SUCESSO
+        assert resultado.codigo_barras == BOLETO
+
+    def test_ruido_em_todos_os_zooms_aciona_o_recorte_manual(self):
+        seletor = SeletorFalso(np.zeros((5, 5, 3), dtype=np.uint8))
+        processador = montar(
+            DecodificadorFalso([itf("99887766")], [itf("99887766")], [itf(BOLETO)]),
+            seletor=seletor,
+            zooms=(2.0, 3.0),
+        )
+
+        (resultado,) = processador.processar("lote.pdf")
+
+        assert seletor.chamadas == 1
+        assert resultado.codigo_barras == BOLETO
+
+    def test_ruido_vira_pendencia_quando_nada_mais_aparece(self):
+        """O ruído não some do relatório: vira linha sinalizada, não silêncio."""
+        processador = montar(DecodificadorFalso([itf("99887766")]), zooms=(2.0, 3.0))
+
+        (resultado,) = processador.processar("lote.pdf")
+
+        assert resultado.status is StatusLeitura.CODIGO_INVALIDO
+        assert resultado.codigo_barras == "99887766"
+        assert resultado.exige_atencao
+
     def test_para_no_primeiro_zoom_que_decodifica(self):
         renderizador = RenderizadorFalso(DocumentoFalso())
         processador = ProcessadorDocumento(

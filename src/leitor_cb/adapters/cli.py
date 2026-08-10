@@ -23,6 +23,19 @@ CODIGO_PENDENCIAS = 1
 CODIGO_ERRO_USO = 2
 
 
+def zoom_positivo(valor: str) -> float:
+    """Valida `--zoom` no parse: argparse já sai com o código de erro de uso."""
+    try:
+        zoom = float(valor)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{valor}' não é um número.") from None
+
+    if zoom <= 0:
+        raise argparse.ArgumentTypeError(f"o zoom deve ser maior que zero (recebido: {zoom}).")
+
+    return zoom
+
+
 def construir_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="leitor-cb",
@@ -43,7 +56,7 @@ def construir_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--zoom",
-        type=float,
+        type=zoom_positivo,
         nargs="+",
         metavar="Z",
         help="Zooms de renderização tentados em ordem (padrão: 2.0 3.0).",

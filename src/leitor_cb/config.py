@@ -65,4 +65,6 @@ def _zooms_do_ambiente() -> tuple[float, ...]:
     except ValueError:
         return ZOOMS_PADRAO
 
-    return zooms or ZOOMS_PADRAO
+    # Zoom <= 0 quebraria a renderização de toda página, transformando erro de
+    # configuração em lote inteiro de pendências.
+    return tuple(zoom for zoom in zooms if zoom > 0) or ZOOMS_PADRAO

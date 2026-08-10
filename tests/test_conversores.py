@@ -47,6 +47,40 @@ class TestCodigoBarras:
         assert CodigoBarras(corrompido).dv_geral_confere() is False
 
 
+class TestIdentificadorDeValor:
+    """O 3º dígito diz qual Módulo o emissor usou — fora de 6/7/8/9 não dá para
+    saber, e a conferência do DV geral herda o mesmo chute."""
+
+    @pytest.mark.parametrize("identificador", ["6", "7", "8", "9"])
+    def test_aceita_os_do_padrao(self, identificador):
+        codigo = CodigoBarras("82" + identificador + "0" * 41)
+        assert codigo.identificador_valor_valido is True
+
+    @pytest.mark.parametrize("identificador", ["0", "1", "2", "3", "4", "5"])
+    def test_recusa_os_de_fora(self, identificador):
+        codigo = CodigoBarras("82" + identificador + "0" * 41)
+        assert codigo.identificador_valor_valido is False
+        assert "fora do padrão" in codigo.motivo_de_desconfianca()
+
+    def test_nao_se_aplica_a_cobranca(self):
+        # Em boleto o 3º dígito é parte do código do banco, não identificador.
+        codigo = CodigoBarras(BOLETO_COBRANCA)
+        assert codigo.identificador_valor == "1"
+        assert codigo.identificador_valor_valido is True
+        assert codigo.motivo_de_desconfianca() is None
+
+    def test_identificador_invalido_pesa_mesmo_com_dv_coerente(self):
+        """Sem isto, um DV auto-consistente deixaria a linha passar calada."""
+        codigo = CodigoBarras("8117" + "0" * 40)
+
+        assert codigo.dv_geral_confere() is True
+        assert codigo.motivo_de_desconfianca() is not None
+
+    def test_dv_divergente_continua_sendo_relatado(self):
+        corrompido = BOLETO_COBRANCA[:20] + "7" + BOLETO_COBRANCA[21:]
+        assert CodigoBarras(corrompido).motivo_de_desconfianca() == "DV geral não confere"
+
+
 class TestConversorCobranca:
     def test_gera_linha_de_47_digitos(self, fabrica):
         linha = fabrica.converter(CodigoBarras(BOLETO_COBRANCA))
