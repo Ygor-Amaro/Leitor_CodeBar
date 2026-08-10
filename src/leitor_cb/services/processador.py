@@ -100,22 +100,33 @@ class ProcessadorDocumento:
 
     def _detectar(self, documento, arquivo: str, numero: int) -> list[CodigoDetectado]:
         """Tenta a leitura automática em zooms crescentes; cai para o recorte
-        manual só se nada for encontrado."""
+        manual só se nenhum zoom trouxer algo aproveitável.
+
+        A escalada para quando aparece um código *útil*, não quando aparece um
+        código qualquer: uma nota fiscal costuma ter ITF de rastreio legível já
+        no zoom baixo, e parar nele esconderia o boleto que só sai no zoom alto.
+        """
         if self._sempre_manual and self._seletor is not None:
             imagem = documento.renderizar(numero, self._zooms[0])
             return self._detectar_manual(imagem, arquivo, numero)
 
         imagem = None
+        ruido: list[CodigoDetectado] = []
         for zoom in self._zooms:
             imagem = documento.renderizar(numero, zoom)
             detectados = self._decodificador.decodificar(imagem)
-            if detectados:
+            if any(_eh_util(detectado) for detectado in detectados):
                 return detectados
+            ruido = detectados or ruido
 
         if self._seletor is not None and imagem is not None:
-            return self._detectar_manual(imagem, arquivo, numero)
+            recorte = self._detectar_manual(imagem, arquivo, numero)
+            if recorte:
+                return recorte
 
-        return []
+        # Sem nada aproveitável: devolve o que houver para virar pendência
+        # explícita no relatório, em vez de sumir como "sem código".
+        return ruido
 
     def _detectar_manual(
         self, imagem: np.ndarray, arquivo: str, numero: int
@@ -133,11 +144,7 @@ class ProcessadorDocumento:
         Uma nota fiscal pode ter outros códigos ITF impressos; se algum for um
         boleto válido ou um QR, só esses interessam.
         """
-        uteis = [
-            detectado
-            for detectado in detectados
-            if detectado.eh_qrcode or _eh_codigo_barras_valido(detectado.texto)
-        ]
+        uteis = [detectado for detectado in detectados if _eh_util(detectado)]
         return uteis or list(detectados)
 
     def _interpretar(
@@ -153,6 +160,15 @@ class ProcessadorDocumento:
 
         linha = self._fabrica.converter(codigo)
         return ResultadoLeitura.de_boleto(arquivo, pagina, codigo, linha)
+
+
+def _eh_util(detectado: CodigoDetectado) -> bool:
+    """Um QR (PIX) ou um código de barras no formato FEBRABAN — o resto é ruído.
+
+    Mesmo critério usado para decidir se vale escalar o zoom e para filtrar a
+    página; manter os dois juntos evita que divirjam.
+    """
+    return detectado.eh_qrcode or _eh_codigo_barras_valido(detectado.texto)
 
 
 def _eh_codigo_barras_valido(texto: str) -> bool:

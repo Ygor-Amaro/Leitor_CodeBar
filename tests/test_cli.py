@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from leitor_cb.adapters.cli import (
     CODIGO_ERRO_USO,
     configuracao_de,
@@ -33,6 +35,14 @@ class TestConfiguracao:
 
     def test_zoom_sobrepoe_o_padrao(self):
         assert configurar("--zoom", "1.5", "4").zooms == (1.5, 4.0)
+
+    @pytest.mark.parametrize("invalido", ["0", "-2", "abc"])
+    def test_zoom_invalido_e_erro_de_uso(self, invalido, capsys):
+        """Zoom <= 0 quebraria toda página: melhor recusar no parse."""
+        with pytest.raises(SystemExit) as saida:
+            configurar("--zoom", invalido)
+
+        assert saida.value.code == CODIGO_ERRO_USO
 
     def test_caminhos_sobrepoem_o_padrao(self):
         config = configurar("--entrada", "x/y", "--saida", "z")

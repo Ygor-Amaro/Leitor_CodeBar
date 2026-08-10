@@ -21,6 +21,10 @@ COLUNAS = (
     "observacao",
 )
 
+# O Excel trata como fórmula toda célula iniciada por estes caracteres. TAB e CR
+# entram porque o Excel os ignora antes de decidir, servindo de disfarce.
+INICIADORES_DE_FORMULA = ("=", "+", "-", "@", "\t", "\r")
+
 
 class Exportador(Protocol):
     """Porta de saída. Acrescentar JSON ou banco de dados é implementar isto."""
@@ -44,7 +48,9 @@ class ExportadorConsole:
             return
 
         linha = LinhaDigitavel(resultado.linha_digitavel, resultado.tipo)
-        alerta = "" if resultado.dv_ok else "  <-- DV GERAL NAO CONFERE"
+        # O motivo vem pronto do domínio: DV divergente e identificador de valor
+        # fora do padrão são alertas diferentes e o operador precisa saber qual.
+        alerta = "" if resultado.dv_ok else f"  <-- {resultado.observacao}"
         print(f"{prefixo} Linha digitável: {linha.formatada()}{alerta}")
 
     def exportar(self, resultados: Sequence[ResultadoLeitura]) -> None:
@@ -80,13 +86,13 @@ class ExportadorCsv:
 
     def exportar(self, resultados: Sequence[ResultadoLeitura]) -> Path:
         self._diretorio.mkdir(parents=True, exist_ok=True)
-        destino = self._diretorio / (
-            f"{self._prefixo}_{datetime.now():%Y%m%d_%H%M%S}.csv"
-        )
+        destino = self._caminho_livre()
 
         with destino.open("w", encoding="utf-8-sig", newline="") as arquivo:
+            # QUOTE_ALL para que o prefixo de tabulação chegue íntegro ao Excel:
+            # sem aspas, o TAB fica solto no arquivo e a proteção não é confiável.
             escritor = csv.DictWriter(
-                arquivo, fieldnames=COLUNAS, delimiter=";", quoting=csv.QUOTE_MINIMAL
+                arquivo, fieldnames=COLUNAS, delimiter=";", quoting=csv.QUOTE_ALL
             )
             escritor.writeheader()
             for resultado in resultados:
@@ -94,24 +100,45 @@ class ExportadorCsv:
 
         return destino
 
+    def _caminho_livre(self) -> Path:
+        """Nome ainda não usado. O carimbo tem resolução de segundos, então dois
+        lotes seguidos colidiriam e o primeiro relatório se perderia calado."""
+        carimbo = f"{datetime.now():%Y%m%d_%H%M%S}"
+        destino = self._diretorio / f"{self._prefixo}_{carimbo}.csv"
+
+        contador = 2
+        while destino.exists():
+            destino = self._diretorio / f"{self._prefixo}_{carimbo}_{contador}.csv"
+            contador += 1
+
+        return destino
+
     @staticmethod
     def _linha(resultado: ResultadoLeitura) -> dict[str, str]:
         return {
-            "arquivo": resultado.arquivo,
+            "arquivo": _texto_seguro(resultado.arquivo),
             "pagina": str(resultado.pagina),
             "tipo": resultado.tipo.value if resultado.tipo else "",
-            # Prefixo de tabulação impede o Excel de converter o número em
-            # notação científica e perder dígitos do código.
             "codigo_barras": _texto_seguro(resultado.codigo_barras),
             "linha_digitavel": _texto_seguro(resultado.linha_digitavel),
             "dv_ok": "" if resultado.dv_ok is None else ("sim" if resultado.dv_ok else "nao"),
             "status": resultado.status.value,
-            "observacao": resultado.observacao,
+            "observacao": _texto_seguro(resultado.observacao),
         }
 
 
 def _texto_seguro(valor: str) -> str:
-    """Mantém sequências longas de dígitos como texto ao abrir no Excel."""
+    """Deixa o valor inofensivo para o Excel.
+
+    Dois riscos, porque o CSV é feito para ser aberto com duplo clique: número
+    longo virar notação científica (some dígito do código) e texto virar fórmula
+    viva. O conteúdo vem de dentro do PDF — payload de PIX, nome de arquivo,
+    leitura falha — e portanto não é confiável.
+    """
     if valor.isdigit():
         return f"\t{valor}"
+    if valor.startswith(INICIADORES_DE_FORMULA):
+        # Apóstrofo é a neutralização que o Excel entende; fica visível na
+        # célula, o que também serve de aviso de que o conteúdo era estranho.
+        return f"'{valor}"
     return valor
