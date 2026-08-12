@@ -5,7 +5,14 @@ from contextlib import contextmanager
 import numpy as np
 import pytest
 
-from leitor_cb.domain import DocumentoIlegivelError, StatusLeitura, TipoDocumento
+from leitor_cb.domain import (
+    DocumentoIlegivelError,
+    PaginaInexistenteError,
+    Recorte,
+    RecorteInvalidoError,
+    StatusLeitura,
+    TipoDocumento,
+)
 from leitor_cb.services import CodigoDetectado, ProcessadorDocumento
 
 BOLETO = "34196152300000406291095000320351024589465000"
@@ -306,3 +313,110 @@ class TestObservador:
 )
 def test_deteccao_de_qrcode_ignora_espacos_e_caixa(formato, esperado):
     assert CodigoDetectado(texto="x", formato=formato).eh_qrcode is esperado
+
+
+class TestLeituraDeArea:
+    """Releitura de uma página, com ou sem recorte — o caminho do recorte manual."""
+
+    def montar_com_pagina(self, decodificador, largura=100, altura=80):
+        documento = DocumentoFalso()
+        documento.renderizar = lambda pagina, zoom: np.zeros(
+            (altura, largura, 3), dtype=np.uint8
+        )
+        return ProcessadorDocumento(
+            renderizador=RenderizadorFalso(documento), decodificador=decodificador
+        )
+
+    def test_recorte_passa_so_o_pedaco_ao_decodificador(self):
+        vistos = []
+
+        class Espiao:
+            def decodificar(self, imagem):
+                vistos.append(imagem.shape)
+                return [itf(BOLETO)]
+
+        processador = self.montar_com_pagina(Espiao())
+        imagem = processador.renderizar_pagina("x.pdf", 1, 2.0)
+
+        processador.ler_area(
+            "x.pdf", 1, imagem, Recorte(x=10, y=5, largura=30, altura=20, zoom=2.0)
+        )
+
+        assert vistos == [(20, 30, 3)]
+
+    def test_recorte_que_passa_da_borda_e_preso_aos_limites(self):
+        """Arrastar o mouse para fora da imagem é gesto natural; sem prender, a
+        fatia sairia vazia e viraria um 'nenhum código encontrado' enganoso."""
+        vistos = []
+
+        class Espiao:
+            def decodificar(self, imagem):
+                vistos.append(imagem.shape)
+                return []
+
+        processador = self.montar_com_pagina(Espiao(), largura=100, altura=80)
+        imagem = processador.renderizar_pagina("x.pdf", 1, 2.0)
+
+        processador.ler_area(
+            "x.pdf", 1, imagem, Recorte(x=90, y=70, largura=500, altura=500, zoom=2.0)
+        )
+
+        assert vistos == [(10, 10, 3)]
+
+    def test_recorte_inteiramente_fora_da_pagina_e_recusado(self):
+        processador = self.montar_com_pagina(DecodificadorFalso())
+        imagem = processador.renderizar_pagina("x.pdf", 1, 2.0)
+
+        with pytest.raises(RecorteInvalidoError):
+            processador.ler_area(
+                "x.pdf", 1, imagem, Recorte(x=500, y=500, largura=10, altura=10, zoom=2.0)
+            )
+
+    def test_area_sem_codigo_avisa_que_foi_a_marcacao(self):
+        processador = self.montar_com_pagina(DecodificadorFalso())
+        imagem = processador.renderizar_pagina("x.pdf", 1, 2.0)
+
+        (resultado,) = processador.ler_area(
+            "x.pdf", 1, imagem, Recorte(x=1, y=1, largura=10, altura=10, zoom=2.0)
+        )
+
+        assert resultado.status is StatusLeitura.SEM_CODIGO
+        assert "área marcada" in resultado.observacao
+
+    def test_pagina_inteira_sem_codigo_mantem_a_mensagem_de_sempre(self):
+        processador = self.montar_com_pagina(DecodificadorFalso())
+        imagem = processador.renderizar_pagina("x.pdf", 1, 2.0)
+
+        (resultado,) = processador.ler_area("x.pdf", 1, imagem)
+
+        assert "na página" in resultado.observacao
+
+    def test_leitura_da_area_passa_pelas_mesmas_regras_febraban(self):
+        """O recorte manual não pode ser um segundo pipeline: tem de converter o
+        código pelas mesmas regras da varredura automática."""
+        processador = self.montar_com_pagina(DecodificadorFalso([itf(BOLETO)]))
+        imagem = processador.renderizar_pagina("x.pdf", 1, 2.0)
+
+        (resultado,) = processador.ler_area(
+            "x.pdf", 1, imagem, Recorte(x=0, y=0, largura=50, altura=50, zoom=2.0)
+        )
+
+        assert resultado.linha_digitavel == LINHA_BOLETO
+        assert resultado.tipo is TipoDocumento.COBRANCA
+
+    def test_pagina_fora_do_documento_e_recusada(self):
+        processador = ProcessadorDocumento(
+            renderizador=RenderizadorFalso(DocumentoFalso(total_paginas=2)),
+            decodificador=DecodificadorFalso(),
+        )
+
+        with pytest.raises(PaginaInexistenteError):
+            processador.renderizar_pagina("x.pdf", 3, 2.0)
+
+    def test_total_de_paginas_vem_do_documento(self):
+        processador = ProcessadorDocumento(
+            renderizador=RenderizadorFalso(DocumentoFalso(total_paginas=7)),
+            decodificador=DecodificadorFalso(),
+        )
+
+        assert processador.total_de_paginas("x.pdf") == 7
