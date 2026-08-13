@@ -1,0 +1,21 @@
+# O que não entra no contexto de build.
+#
+# Vale mais que economia de tempo: `data/` guarda boletos e relatórios reais, e
+# tudo que é enviado ao daemon do Docker acaba dentro de uma camada da imagem.
+
+data/
+.env
+.venv/
+.uvtmp/
+.git/
+.gitignore
+.claude/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+*.py[cod]
+tests/
+Dockerfile
+docker-compose.yml
+.dockerignore

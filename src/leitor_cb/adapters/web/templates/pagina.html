@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% import "_leituras.html" as leituras_macro %}
+
+{% set base = "/lotes/" ~ lote.identificador ~ "/documentos/" ~ documento.indice ~ "/paginas/" %}
+
+{% block titulo %}Recorte — {{ documento.nome_original }} p.{{ pagina }}{% endblock %}
+
+{% block conteudo %}
+<p class="voltar"><a href="/lotes/{{ lote.identificador }}">← Voltar ao lote</a></p>
+
+<section class="cartao">
+  <header class="painel-topo">
+    <h2>{{ documento.nome_original }}</h2>
+    <span class="marcador">página {{ pagina }} de {{ total_paginas }}</span>
+  </header>
+
+  <p class="dica">
+    Arraste sobre a imagem para marcar onde está o código de barras ou o QR Code
+    e clique em <strong>Ler seleção</strong>. Se preferir, aumente o zoom e leia
+    a página inteira. <kbd>Esc</kbd> limpa a marcação.
+  </p>
+
+  <div class="controles">
+    <span class="rotulo">Zoom</span>
+    {% for opcao in zooms %}
+      <a class="botao-secundario {{ 'ativo' if opcao == zoom else '' }}"
+         href="{{ base }}{{ pagina }}?zoom={{ opcao }}">{{ opcao }}×</a>
+    {% endfor %}
+
+    <span class="separador"></span>
+
+    {% if pagina > 1 %}
+      <a class="botao-secundario" href="{{ base }}{{ pagina - 1 }}?zoom={{ zoom }}">← anterior</a>
+    {% endif %}
+    {% if pagina < total_paginas %}
+      <a class="botao-secundario" href="{{ base }}{{ pagina + 1 }}?zoom={{ zoom }}">próxima →</a>
+    {% endif %}
+  </div>
+
+  <form hx-post="{{ base }}{{ pagina }}/releitura"
+        hx-target="#leitura"
+        hx-swap="innerHTML"
+        hx-disabled-elt="find button">
+    {# O JavaScript do recorte só escreve nestes campos; quem envia é o HTMX. #}
+    <input type="hidden" name="zoom" value="{{ zoom }}">
+    <input type="hidden" name="x" id="campo-x" value="0">
+    <input type="hidden" name="y" id="campo-y" value="0">
+    <input type="hidden" name="largura" id="campo-largura" value="0">
+    <input type="hidden" name="altura" id="campo-altura" value="0">
+
+    <div class="palco" id="palco">
+      <img id="imagem-pagina"
+           src="/api/lotes/{{ lote.identificador }}/documentos/{{ documento.indice }}/paginas/{{ pagina }}/imagem?zoom={{ zoom }}"
+           alt="Página {{ pagina }} de {{ documento.nome_original }}">
+      <div class="selecao" id="retangulo" hidden></div>
+    </div>
+
+    <div class="controles">
+      <button type="submit">Ler seleção</button>
+      <button type="submit" class="botao-secundario" id="ler-pagina">Ler página inteira</button>
+      <span id="medida" class="dica"></span>
+    </div>
+  </form>
+</section>
+
+<div id="leitura">
+  <div class="cartao">
+    {{ leituras_macro.lista(
+         leituras | map(attribute='resultado') | list,
+         'Leitura atual desta página'
+       ) }}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/estaticos/selecao.js"></script>
+{% endblock %}

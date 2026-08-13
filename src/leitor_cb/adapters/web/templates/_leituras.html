@@ -1,0 +1,41 @@
+{# Leituras de uma página, na tela de recorte: o que já estava gravado e o que a
+   releitura achou. Uma macro só, para as duas não divergirem. #}
+{% macro lista(resultados, titulo) %}
+  <h3 class="titulo-leitura">{{ titulo }}</h3>
+
+  {% if resultados %}
+    <ul class="leituras">
+      {% for resultado in resultados %}
+        <li class="{{ 'atencao' if resultado.exige_atencao else '' }}">
+          <span class="rotulo">{{ resultado.tipo.value if resultado.tipo else resultado.status.value }}</span>
+
+          {% if resultado.linha_digitavel %}
+            {% if resultado.tipo and resultado.tipo.value != 'pix' %}
+              <span class="mono mascara">{{ resultado.linha_formatada }}</span>
+            {% endif %}
+            <div class="copia">
+              <input class="copiavel mono"
+                     type="text"
+                     readonly
+                     value="{{ resultado.linha_digitavel }}"
+                     onclick="this.select()"
+                     aria-label="Linha digitável de {{ resultado.arquivo }}, página {{ resultado.pagina }}">
+              <button type="button"
+                      class="botao-copiar"
+                      data-copiar
+                      aria-label="Copiar a linha de {{ resultado.arquivo }}, página {{ resultado.pagina }}">
+                Copiar
+              </button>
+            </div>
+          {% endif %}
+
+          {% if resultado.observacao %}
+            <span class="observacao">{{ resultado.observacao }}</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="vazio">Nenhuma leitura nesta página.</p>
+  {% endif %}
+{% endmacro %}

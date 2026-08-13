@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{# Erro em navegação de página inteira. Quem chega aqui costuma ter aberto o
+   link de um lote que já expirou, então o conteúdo é o caminho de volta. #}
+
+{% block titulo %}Erro {{ codigo }} — Leitor CB{% endblock %}
+
+{% block conteudo %}
+<section class="cartao">
+  <h2>Não foi possível abrir esta página</h2>
+  <p class="alerta" role="alert">{{ mensagem }}</p>
+  <p class="dica"><a href="/">Voltar ao início</a></p>
+</section>
+{% endblock %}

@@ -1,0 +1,11 @@
+{# Rótulos legíveis dos estados. Sempre chamado com `estado.value`: a chave do
+   dicionário é a string em minúsculas, e um StrEnum não casa por hash com ela. #}
+{% macro marcador(estado) %}
+  {%- set rotulos = {
+    'pendente': 'Na fila',
+    'processando': 'Processando',
+    'concluido': 'Concluído',
+    'falhou': 'Falhou'
+  } -%}
+  <span class="marcador marcador-{{ estado }}">{{ rotulos.get(estado, estado) }}</span>
+{% endmacro %}

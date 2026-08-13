@@ -1,0 +1,24 @@
+{% import "_leituras.html" as leituras %}
+{# Resposta da releitura manual. #}
+<div class="cartao destaque">
+  {{ leituras.lista(
+       resultados,
+       'Resultado da área marcada' if recortado else 'Resultado da página inteira'
+     ) }}
+
+  {% if atualizou %}
+    <p class="dica">
+      O relatório do lote foi atualizado.
+      <a href="/lotes/{{ identificador }}">Voltar ao lote</a> para baixar o CSV.
+    </p>
+  {% else %}
+    {# Nada foi gravado: o que já havia na página continua lá. Dizer isso importa
+       porque a mensagem anterior afirmava ter atualizado o relatório mesmo
+       quando a leitura vinha vazia. #}
+    <p class="dica">
+      Nada foi encontrado, e o relatório continua como estava. Tente marcar uma
+      área maior, incluindo as bordas claras do código, ou aumente o zoom antes
+      de marcar.
+    </p>
+  {% endif %}
+</div>

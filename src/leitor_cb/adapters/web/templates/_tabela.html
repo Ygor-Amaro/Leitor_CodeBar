@@ -1,0 +1,121 @@
+{#
+  Tudo aqui saiu de um PDF de terceiro: o autoescape do Jinja está ligado e
+  nenhum destes campos pode receber `|safe`.
+
+  Filtro e marcação de "já copiada" ficam no navegador (`static/relatorio.js`):
+  filtrar não vale uma ida ao servidor, e a marcação é do operador, não do lote.
+#}
+{% if leituras %}
+<div class="filtros" data-filtros>
+  <label class="busca">
+    <span class="visualmente-oculto">Filtrar linhas</span>
+    <input type="search"
+           data-busca
+           placeholder="filtrar por arquivo, código ou observação"
+           autocomplete="off">
+  </label>
+
+  <div class="chips" role="group" aria-label="Mostrar quais linhas">
+    <button type="button" class="chip ativo" data-filtro="todas" aria-pressed="true">
+      Todas <span class="conta" data-conta="todas"></span>
+    </button>
+    <button type="button" class="chip" data-filtro="atencao" aria-pressed="false">
+      Para conferir <span class="conta" data-conta="atencao"></span>
+    </button>
+    <button type="button" class="chip" data-filtro="prontas" aria-pressed="false">
+      Prontas <span class="conta" data-conta="prontas"></span>
+    </button>
+  </div>
+
+  <label class="alternador">
+    <input type="checkbox" data-ocultar-copiadas>
+    ocultar as já copiadas
+  </label>
+
+  <span class="contagem" data-contagem role="status"></span>
+</div>
+
+<div class="rolagem">
+  <table class="tabela" data-tabela data-lote="{{ lote.identificador }}">
+    <thead>
+      <tr>
+        <th class="coluna-marca" title="Já copiada">✓</th>
+        <th>Arquivo</th>
+        <th>Pág.</th>
+        <th>Tipo</th>
+        <th>Linha digitável / PIX</th>
+        <th>DV</th>
+        <th>Observação</th>
+        {% if arquivos_disponiveis %}<th></th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for leitura in leituras %}
+      {% set resultado = leitura.resultado %}
+      {# Endereço da linha, para lembrar o que já foi copiado. O índice desempata
+         dois códigos na mesma página. #}
+      {% set chave = leitura.documento_indice ~ '-' ~ resultado.pagina ~ '-' ~ loop.index %}
+      <tr class="{{ 'atencao' if resultado.exige_atencao else '' }}"
+          data-linha="{{ chave }}"
+          data-atencao="{{ 1 if resultado.exige_atencao else 0 }}"
+          data-busca="{{ (resultado.arquivo ~ ' ' ~ (resultado.tipo.value if resultado.tipo else '') ~ ' ' ~ resultado.linha_digitavel ~ ' ' ~ resultado.observacao) | lower }}">
+        <td class="coluna-marca">
+          {# Marcada sozinha ao copiar; manual para quem chegou ao banco por
+             outro caminho e ainda quer saber onde parou. #}
+          <input type="checkbox"
+                 data-copiada
+                 aria-label="Marcar {{ resultado.arquivo }} página {{ resultado.pagina }} como já copiada">
+        </td>
+        <td class="arquivo">{{ resultado.arquivo }}</td>
+        <td>{{ resultado.pagina }}</td>
+        <td>{{ resultado.tipo.value if resultado.tipo else '—' }}</td>
+        <td class="celula-linha">
+          {% if resultado.linha_digitavel %}
+            {% if resultado.tipo and resultado.tipo.value != 'pix' %}
+              <span class="mono mascara">{{ resultado.linha_formatada }}</span>
+            {% endif %}
+            {# O campo carrega o valor cru, que é o que se cola no banco. Clicar
+               nele seleciona tudo — o caminho de sempre, se a cópia falhar. #}
+            <div class="copia">
+              <input class="copiavel mono"
+                     type="text"
+                     readonly
+                     value="{{ resultado.linha_digitavel }}"
+                     onclick="this.select()"
+                     aria-label="Linha digitável de {{ resultado.arquivo }}, página {{ resultado.pagina }}">
+              <button type="button"
+                      class="botao-copiar"
+                      data-copiar
+                      aria-label="Copiar a linha de {{ resultado.arquivo }}, página {{ resultado.pagina }}">
+                Copiar
+              </button>
+            </div>
+          {% else %}
+            <span class="vazio">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if resultado.dv_ok is none %}—
+          {% elif resultado.dv_ok %}<span class="ok">ok</span>
+          {% else %}<span class="ruim">conferir</span>
+          {% endif %}
+        </td>
+        <td class="observacao">{{ resultado.observacao }}</td>
+        {% if arquivos_disponiveis %}
+        <td>
+          {# Abre a página no tamanho grande para o operador marcar o código à
+             mão — o mesmo recurso do recorte da CLI, aqui pelo navegador. #}
+          <a class="acao"
+             href="/lotes/{{ lote.identificador }}/documentos/{{ leitura.documento_indice }}/paginas/{{ resultado.pagina }}">recortar</a>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="vazio nenhuma-linha" hidden>Nenhuma linha corresponde ao filtro.</p>
+{% else %}
+<p class="vazio">Nenhuma leitura neste lote.</p>
+{% endif %}

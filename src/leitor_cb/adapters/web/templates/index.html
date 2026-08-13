@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<section class="cartao">
+  <h2>Enviar documentos</h2>
+
+  <form class="envio"
+        hx-post="/lotes"
+        hx-encoding="multipart/form-data"
+        hx-target="#painel"
+        hx-swap="innerHTML"
+        hx-disabled-elt="find button"
+        hx-indicator="#enviando">
+    <label class="campo">
+      <span>Arquivos PDF</span>
+      <input type="file" name="arquivos" accept="application/pdf,.pdf" multiple required>
+    </label>
+
+    <button type="submit">Ler documentos</button>
+    <span id="enviando" class="indicador">enviando…</span>
+
+    <p class="dica">
+      Até {{ config.maximo_de_arquivos }} arquivos por envio, {{ config.tamanho_maximo_mb }} MB cada.
+      Páginas que o leitor não resolver sozinho entram no relatório como pendência.
+    </p>
+  </form>
+</section>
+
+<div id="painel"></div>
+
+<section class="cartao">
+  <h2>Últimos lotes</h2>
+  <div id="historico"
+       hx-get="/historico"
+       hx-trigger="lote-atualizado from:body"
+       hx-swap="innerHTML">
+    {% include "_historico.html" %}
+  </div>
+</section>
+{% endblock %}

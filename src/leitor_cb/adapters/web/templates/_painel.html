@@ -1,0 +1,82 @@
+{% import "_rotulos.html" as rotulos %}
+{#
+  Enquanto o lote roda, esta seção se pede de volta a cada segundo e se
+  substitui. Ao terminar, volta sem os atributos hx-* e o polling para sozinho.
+#}
+<section class="cartao painel"
+         {% if not lote.terminado %}
+         hx-get="/lotes/{{ lote.identificador }}/painel"
+         hx-trigger="every 1s"
+         hx-swap="outerHTML"
+         {# Marca de pedido de fundo: no erro o base.html mantém o painel em vez
+            de trocá-lo pelo alerta, que levaria o hx-trigger junto. #}
+         data-repetindo
+         {% endif %}>
+
+  <header class="painel-topo">
+    <h2>Lote {{ lote.identificador[:8] }}</h2>
+    {{ rotulos.marcador(lote.estado.value) }}
+  </header>
+
+  {% if not lote.terminado %}
+    <p class="andamento" aria-live="polite">
+      Lendo {{ lote.documentos_processados }} de {{ lote.total_documentos }} documento(s).
+    </p>
+
+    {# Aviso de tela desatualizada, não de lote perdido: a leitura continua. #}
+    <p class="reconectando" role="status">
+      Sem resposta do servidor. A leitura continua; tentando atualizar…
+    </p>
+    <div class="barra"
+         role="progressbar"
+         aria-valuenow="{{ lote.percentual }}"
+         aria-valuemin="0"
+         aria-valuemax="100"
+         aria-label="Progresso do lote">
+      <div class="barra-preenchida" style="width: {{ lote.percentual }}%"></div>
+    </div>
+
+  {% elif lote.estado.value == 'falhou' %}
+    <p class="alerta" role="alert">{{ lote.observacao }}</p>
+
+  {% else %}
+    <ul class="resumo">
+      <li><strong>{{ resumo.total }}</strong> leitura(s)</li>
+      <li><strong>{{ resumo.sucessos }}</strong> com código</li>
+      <li class="{{ 'resumo-atencao' if resumo.pendencias else '' }}">
+        <strong>{{ resumo.pendencias }}</strong> para conferir
+      </li>
+    </ul>
+
+    <p class="acoes">
+      {% if lote.nome_csv %}
+        <a class="botao" href="/lotes/{{ lote.identificador }}/relatorio">Baixar CSV</a>
+      {% endif %}
+
+      {% if arquivos_disponiveis %}
+        <button type="button"
+                class="botao-secundario"
+                hx-post="/lotes/{{ lote.identificador }}/arquivos/descartar"
+                hx-target="closest .painel"
+                hx-swap="outerHTML"
+                hx-confirm="Apagar os PDFs deste lote? Depois disso não dá mais para recortar as páginas à mão.">
+          Descartar arquivos agora
+        </button>
+      {% endif %}
+    </p>
+
+    {% if arquivos_disponiveis %}
+      <p class="dica">
+        Linha que ficou como pendência pode ser relida à mão: use o
+        <strong>recortar</strong> na última coluna para marcar o código na página.
+      </p>
+    {% elif lote.nome_csv %}
+      <p class="dica">
+        Os PDFs deste lote já foram descartados — para reler uma página à mão,
+        envie o arquivo de novo.
+      </p>
+    {% endif %}
+
+    {% include "_tabela.html" %}
+  {% endif %}
+</section>

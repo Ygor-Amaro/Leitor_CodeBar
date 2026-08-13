@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block titulo %}Lote {{ lote.identificador[:8] }} — Leitor CB{% endblock %}
+
+{% block conteudo %}
+<p class="voltar"><a href="/">← Novo envio</a></p>
+
+<div id="painel">
+  {% include "_painel.html" %}
+</div>
+{% endblock %}

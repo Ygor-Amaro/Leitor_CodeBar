@@ -1,0 +1,491 @@
+/* Estilo do Leitor CB.
+   Sem framework: a tela é um formulário e duas tabelas, e uma folha local não
+   depende de CDN — o servidor roda em máquina de escritório, atrás de proxy.
+
+   Espaçamento sai todo da escala `--e*`. Valor solto foi o que deixou a tela
+   apertada: cada bloco escolhia o seu, e nada respirava junto. */
+
+:root {
+  /* Escala de espaço. Passo de 4px, que é o que dá ritmo sem virar decisão. */
+  --e1: .25rem;
+  --e2: .5rem;
+  --e3: .75rem;
+  --e4: 1rem;
+  --e5: 1.5rem;
+  --e6: 2rem;
+  --e7: 3rem;
+
+  --raio: 10px;
+  --raio-pequeno: 6px;
+
+  --fundo: #f4f5f7;
+  --superficie: #ffffff;
+  --borda: #d8dbe0;
+  --borda-suave: #e8eaee;
+  --texto: #1c1f24;
+  --texto-fraco: #5a616b;
+  --acento: #1a5fb4;
+  --acento-texto: #ffffff;
+  --acento-suave: rgba(26, 95, 180, .08);
+  --atencao-fundo: #fff6e0;
+  --atencao-borda: #e5a50a;
+  --erro-fundo: #fdeaea;
+  --erro-borda: #c01c28;
+  --ok: #1a7f37;
+  --ruim: #c01c28;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #16181d;
+    --superficie: #1e2127;
+    --borda: #333842;
+    --borda-suave: #282c34;
+    --texto: #e6e8eb;
+    --texto-fraco: #9aa2ad;
+    --acento: #62a0ea;
+    --acento-texto: #10131a;
+    --acento-suave: rgba(98, 160, 234, .12);
+    --atencao-fundo: #3a2f10;
+    --atencao-borda: #e5a50a;
+    --erro-fundo: #3b1a1c;
+    --erro-borda: #ff7b72;
+    --ok: #57ab5a;
+    --ruim: #ff7b72;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 var(--e4) var(--e7);
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.cabecalho, .conteudo, .rodape { max-width: 1100px; margin: 0 auto; }
+
+.cabecalho { padding: var(--e6) 0 var(--e5); }
+.marca { font-size: 1.5rem; font-weight: 700; color: var(--texto); text-decoration: none; }
+.subtitulo { margin: var(--e1) 0 0; color: var(--texto-fraco); font-size: .9rem; }
+
+/* Teclado precisa enxergar onde está. Um contorno só, em tudo que recebe foco. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.cartao {
+  background: var(--superficie);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  padding: var(--e5);
+  margin-bottom: var(--e5);
+}
+
+h2 { margin: 0 0 var(--e4); font-size: 1.15rem; }
+
+/* ------------------------------------------------------------------- envio */
+
+.campo { display: block; margin-bottom: var(--e4); }
+.campo span {
+  display: block;
+  margin-bottom: var(--e2);
+  color: var(--texto-fraco);
+  font-size: .88rem;
+}
+
+input[type="file"] {
+  max-width: 100%;
+  padding: var(--e3);
+  border: 1px dashed var(--borda);
+  border-radius: var(--raio-pequeno);
+  background: var(--fundo);
+  color: var(--texto);
+  font: inherit;
+  font-size: .9rem;
+}
+
+button, .botao {
+  display: inline-block;
+  padding: var(--e3) var(--e5);
+  border: 1px solid transparent;
+  border-radius: var(--raio-pequeno);
+  background: var(--acento);
+  color: var(--acento-texto);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+button:disabled { opacity: .55; cursor: progress; }
+
+.dica { margin: var(--e4) 0 0; color: var(--texto-fraco); font-size: .88rem; }
+/* Dentro de uma linha de controles a dica é legenda, não parágrafo: o recuo de
+   cima a desalinharia dos botões ao lado. */
+.controles .dica, .acoes .dica { margin: 0; }
+
+/* O HTMX liga a classe `htmx-request` no elemento indicado durante o pedido. */
+.indicador { margin-left: var(--e3); color: var(--texto-fraco); font-size: .88rem; opacity: 0; }
+.htmx-request .indicador, .indicador.htmx-request { opacity: 1; }
+
+/* ------------------------------------------------------------------ painel */
+
+.painel-topo {
+  display: flex;
+  align-items: center;
+  gap: var(--e3);
+  flex-wrap: wrap;
+  margin-bottom: var(--e4);
+}
+.painel-topo h2 { margin: 0; }
+.andamento { margin: 0; color: var(--texto-fraco); }
+
+.marcador {
+  padding: var(--e1) var(--e3);
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  font-size: .8rem;
+  color: var(--texto-fraco);
+  white-space: nowrap;
+}
+.marcador-processando, .marcador-pendente { border-color: var(--atencao-borda); }
+.marcador-concluido { border-color: var(--ok); color: var(--ok); }
+.marcador-falhou { border-color: var(--erro-borda); color: var(--ruim); }
+
+.barra {
+  height: 10px;
+  margin-top: var(--e3);
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.barra-preenchida { height: 100%; background: var(--acento); transition: width .3s ease; }
+
+/* Os três números são o resumo do lote: em bloco, não numa linha corrida. */
+.resumo {
+  display: flex;
+  gap: var(--e3);
+  flex-wrap: wrap;
+  list-style: none;
+  margin: 0 0 var(--e5);
+  padding: 0;
+}
+.resumo li {
+  flex: 1 1 9rem;
+  padding: var(--e3) var(--e4);
+  border: 1px solid var(--borda-suave);
+  border-radius: var(--raio-pequeno);
+  background: var(--fundo);
+  color: var(--texto-fraco);
+  font-size: .88rem;
+}
+.resumo strong {
+  display: block;
+  font-size: 1.6rem;
+  line-height: 1.2;
+  color: var(--texto);
+}
+.resumo-atencao { border-color: var(--atencao-borda); }
+.resumo-atencao strong { color: var(--ruim); }
+
+.acoes {
+  display: flex;
+  align-items: center;
+  gap: var(--e3);
+  flex-wrap: wrap;
+  margin: 0 0 var(--e4);
+}
+
+/* ----------------------------------------------------------------- tabelas */
+
+/* Tabela larga não empurra a página: quem rola é o contêiner. */
+.rolagem { overflow-x: auto; }
+
+.tabela { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.tabela th, .tabela td {
+  padding: var(--e3) var(--e3);
+  border-bottom: 1px solid var(--borda-suave);
+  text-align: left;
+  vertical-align: top;
+}
+.tabela th {
+  padding-bottom: var(--e2);
+  border-bottom: 1px solid var(--borda);
+  color: var(--texto-fraco);
+  font-size: .78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+.tabela tbody tr:hover { background: var(--acento-suave); }
+.tabela tr.atencao { background: var(--atencao-fundo); }
+.tabela td.atencao { color: var(--ruim); font-weight: 600; }
+
+.arquivo { max-width: 280px; word-break: break-word; }
+.observacao { max-width: 280px; color: var(--texto-fraco); font-size: .88rem; }
+.celula-linha { min-width: 340px; }
+
+.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+
+.copiavel {
+  display: block;
+  width: 100%;
+  padding: var(--e2) var(--e2);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio-pequeno);
+  background: var(--fundo);
+  color: var(--texto);
+  font-size: .85rem;
+}
+
+.ok { color: var(--ok); font-weight: 600; }
+.ruim { color: var(--ruim); font-weight: 600; }
+.vazio { color: var(--texto-fraco); }
+
+/* ------------------------------------------------------ copiar e conferir */
+
+/* Campo e botão andam juntos: o botão copia, e clicar no campo seleciona tudo —
+   o caminho que sobra se o navegador barrar a cópia programática. */
+.copia { display: flex; align-items: center; gap: var(--e2); margin-top: var(--e2); }
+/* `min-width: 0` para o campo poder encolher: sem isso o payload longo de um PIX
+   empurraria o botão para fora da célula. */
+.copia .copiavel { flex: 1 1 auto; min-width: 0; }
+
+.botao-copiar {
+  padding: var(--e2) var(--e3);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio-pequeno);
+  background: var(--superficie);
+  color: var(--texto);
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.botao-copiar:hover { border-color: var(--acento); color: var(--acento); }
+.botao-copiar.copiado { border-color: var(--ok); color: var(--ok); }
+.botao-copiar.falhou { border-color: var(--atencao-borda); color: var(--texto-fraco); }
+
+.mascara { display: block; letter-spacing: .01em; }
+
+.coluna-marca { width: 2.2rem; text-align: center; }
+.coluna-marca input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
+.tabela th.coluna-marca { color: var(--ok); }
+
+/* Linha copiada recua mas continua legível — o que falta colar precisa se
+   distinguir de relance. */
+.tabela tr.copiada { opacity: .5; }
+.tabela tr.copiada td.coluna-marca { box-shadow: inset 3px 0 0 var(--ok); }
+
+/* Faixa própria, separada da tabela por uma linha: é controle, não conteúdo. */
+.filtros {
+  display: flex;
+  align-items: center;
+  gap: var(--e3) var(--e4);
+  flex-wrap: wrap;
+  padding-bottom: var(--e4);
+  margin-bottom: var(--e4);
+  border-bottom: 1px solid var(--borda-suave);
+}
+
+.busca { flex: 1 1 18rem; }
+.busca input {
+  width: 100%;
+  padding: var(--e2) var(--e3);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio-pequeno);
+  background: var(--fundo);
+  color: var(--texto);
+  font: inherit;
+  font-size: .9rem;
+}
+
+.chips { display: flex; gap: var(--e2); flex-wrap: wrap; }
+.chip {
+  padding: var(--e2) var(--e3);
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  background: var(--superficie);
+  color: var(--texto-fraco);
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--acento); color: var(--acento); }
+.chip.ativo {
+  border-color: var(--acento);
+  background: var(--acento);
+  color: var(--acento-texto);
+}
+.chip .conta { font-weight: 700; }
+
+.alternador {
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+  color: var(--texto-fraco);
+  font-size: .88rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.contagem { color: var(--texto-fraco); font-size: .85rem; }
+
+.nenhuma-linha { margin: var(--e5) 0 0; }
+
+/* --------------------------------------------------------------- avisos */
+
+/* Aviso de tela desatualizada: aparece quando o painel perde contato e some na
+   próxima resposta boa. A leitura em si continua. */
+.reconectando {
+  display: none;
+  margin: var(--e3) 0 0;
+  color: var(--texto-fraco);
+  font-size: .88rem;
+}
+.sem-resposta .reconectando { display: block; }
+
+.alerta {
+  margin: 0;
+  padding: var(--e3) var(--e4);
+  border: 1px solid var(--erro-borda);
+  border-left-width: 4px;
+  border-radius: var(--raio-pequeno);
+  background: var(--erro-fundo);
+}
+
+.visualmente-oculto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.voltar { margin: 0 0 var(--e4); }
+.voltar a, .rodape a { color: var(--acento); }
+.rodape {
+  padding-top: var(--e5);
+  margin-top: var(--e5);
+  border-top: 1px solid var(--borda);
+  font-size: .88rem;
+}
+
+/* ------------------------------------------------------- recorte da página */
+
+.botao-secundario {
+  display: inline-block;
+  padding: var(--e2) var(--e3);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio-pequeno);
+  background: var(--superficie);
+  color: var(--texto);
+  font: inherit;
+  font-size: .88rem;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.botao-secundario:hover { border-color: var(--acento); color: var(--acento); }
+.botao-secundario.ativo {
+  border-color: var(--acento);
+  background: var(--acento);
+  color: var(--acento-texto);
+}
+
+.controles {
+  display: flex;
+  align-items: center;
+  gap: var(--e2);
+  flex-wrap: wrap;
+  margin: var(--e4) 0;
+}
+/* Empurra a navegação de páginas para a outra ponta, longe do zoom: são
+   decisões diferentes e clicar uma pela outra custa uma renderização. */
+.separador { flex: 1 1 var(--e5); }
+.rotulo {
+  color: var(--texto-fraco);
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.acao { color: var(--acento); font-size: .88rem; white-space: nowrap; }
+
+/* O palco ancora o retângulo: ele precisa começar exatamente onde a imagem
+   começa, por isso `line-height: 0` e a imagem em `display: block`. */
+.palco {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin: var(--e2) 0 var(--e4);
+  line-height: 0;
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.palco img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  cursor: crosshair;
+  /* O arrasto marca área; sem isto o navegador tenta arrastar a imagem. */
+  user-select: none;
+  -webkit-user-drag: none;
+  touch-action: none;
+}
+
+.selecao {
+  position: absolute;
+  border: 2px dashed var(--acento);
+  background: rgba(26, 95, 180, .16);
+  pointer-events: none;
+}
+
+.destaque { border-color: var(--acento); }
+.titulo-leitura { margin: 0 0 var(--e3); font-size: 1rem; }
+
+.leituras { list-style: none; margin: 0; padding: 0; }
+.leituras li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e2);
+  padding: var(--e3) 0;
+  border-bottom: 1px solid var(--borda-suave);
+}
+.leituras li:first-child { padding-top: 0; }
+.leituras li:last-child { border-bottom: none; padding-bottom: 0; }
+.leituras li.atencao { color: var(--ruim); }
+.leituras .observacao { font-size: .88rem; }
+
+kbd {
+  padding: 0 var(--e1);
+  border: 1px solid var(--borda);
+  border-radius: 4px;
+  background: var(--fundo);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: .85rem;
+}
+
+/* Tela estreita: o cartão devolve a margem lateral para o conteúdo. */
+@media (max-width: 640px) {
+  body { padding: 0 var(--e2) var(--e6); }
+  .cartao { padding: var(--e4); }
+  .cabecalho { padding: var(--e5) 0 var(--e4); }
+}

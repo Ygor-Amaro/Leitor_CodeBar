@@ -1,0 +1,31 @@
+{% import "_rotulos.html" as rotulos %}
+{% if historico %}
+<div class="rolagem">
+  <table class="tabela">
+    <thead>
+      <tr>
+        <th>Quando</th>
+        <th>Documentos</th>
+        <th>Situação</th>
+        <th>Leituras</th>
+        <th>Conferir</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lote, resumo in historico %}
+      <tr>
+        <td>{{ lote.criado_em|momento }}</td>
+        <td>{{ lote.total_documentos }}</td>
+        <td>{{ rotulos.marcador(lote.estado.value) }}</td>
+        <td>{{ resumo.total }}</td>
+        <td class="{{ 'atencao' if resumo.pendencias else '' }}">{{ resumo.pendencias }}</td>
+        <td><a href="/lotes/{{ lote.identificador }}">abrir</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="vazio">Nenhum lote ainda. Envie os primeiros PDFs acima.</p>
+{% endif %}

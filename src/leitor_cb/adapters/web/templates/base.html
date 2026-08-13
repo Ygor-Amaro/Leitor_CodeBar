@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Leitor CB{% endblock %}</title>
+  <link rel="stylesheet" href="/estaticos/estilo.css">
+  <script src="/estaticos/htmx.min.js"></script>
+</head>
+<body>
+  <header class="cabecalho">
+    <a class="marca" href="/">Leitor CB</a>
+    <p class="subtitulo">Códigos de barras FEBRABAN e QR Codes PIX de PDFs de pagamento</p>
+  </header>
+
+  <main class="conteudo">
+    {% block conteudo %}{% endblock %}
+  </main>
+
+  <footer class="rodape">
+    <a href="/docs">Documentação da API</a>
+  </footer>
+
+  <script src="/estaticos/relatorio.js" defer></script>
+  {% block scripts %}{% endblock %}
+
+  <script>
+    // O HTMX só troca conteúdo em 2xx, então um erro sumiria sem rastro. Aqui o
+    // fragmento de alerta é exibido, com o código HTTP correto.
+    //
+    // Exceto no painel que se repete sozinho: trocá-lo levaria os atributos hx-*
+    // junto e o acompanhamento morreria por uma falha de um segundo, com o lote
+    // seguindo sem ninguém vendo. Ele fica onde está, avisa que perdeu contato e
+    // continua tentando; a próxima resposta boa o substitui e leva o aviso.
+    document.body.addEventListener('htmx:beforeSwap', function (evento) {
+      if (evento.detail.xhr.status < 400) {
+        return;
+      }
+
+      var alvo = evento.detail.target;
+      if (alvo && alvo.hasAttribute('data-repetindo')) {
+        evento.detail.shouldSwap = false;
+        evento.detail.isError = false;
+        alvo.classList.add('sem-resposta');
+        return;
+      }
+
+      evento.detail.shouldSwap = true;
+      evento.detail.isError = false;
+    });
+
+    // Servidor fora do ar não tem resposta para trocar: outro evento, mesmo
+    // tratamento.
+    document.body.addEventListener('htmx:sendError', function (evento) {
+      var origem = evento.detail.elt;
+      if (origem && origem.hasAttribute('data-repetindo')) {
+        origem.classList.add('sem-resposta');
+      }
+    });
+  </script>
+</body>
+</html>

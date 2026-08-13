@@ -1,0 +1,38 @@
+# Como o Leitor CB sobe no servidor local: `docker compose up -d`.
+
+services:
+  leitor-cb:
+    build: .
+    image: leitor-cb:0.3.0
+    container_name: leitor-cb
+
+    # Volta sozinho depois de queda de energia ou reinício do servidor, mas não
+    # se alguém parou de propósito com `docker compose stop`.
+    restart: unless-stopped
+
+    ports:
+      # Só a máquina do servidor enxerga. Para liberar à rede do escritório,
+      # troque por "8000:8000" — a partir daí qualquer um na rede lê os boletos,
+      # então faça isso conscientemente.
+      - "127.0.0.1:8000:8000"
+
+    volumes:
+      # Bind mount, não volume nomeado: o time precisa alcançar os CSVs de
+      # data/output pelo explorador de arquivos do servidor. Aqui também ficam
+      # o banco do histórico e os PDFs enviados, que somem sozinhos em 24h.
+      - ./data:/app/data
+
+    environment:
+      TZ: America/Sao_Paulo
+      # Por quanto tempo o PDF enviado fica em disco. Precisa sobreviver ao
+      # envio porque o recorte manual relê o arquivo original.
+      LEITOR_CB_RETENCAO_HORAS: "24"
+      LEITOR_CB_TAMANHO_MAXIMO_MB: "25"
+      LEITOR_CB_MAXIMO_ARQUIVOS: "50"
+
+    # Rasterizar página é caro em memória; o teto evita que um PDF enorme
+    # engula o servidor inteiro, e a aplicação já lê um lote por vez.
+    deploy:
+      resources:
+        limits:
+          memory: 2g
