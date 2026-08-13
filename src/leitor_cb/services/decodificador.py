@@ -8,9 +8,11 @@ from typing import Protocol
 import numpy as np
 import zxingcpp
 
-# Boletos e guias usam ITF (2 de 5 intercalado); o PIX usa QR Code. Restringir
-# os formatos reduz leitura de ruído e acelera a varredura da página inteira.
-FORMATOS_PADRAO = "ITF,QRCode"
+# A ficha de compensação manda ITF (2 de 5 intercalado) e o PIX usa QR Code, mas
+# emissor que imprime os mesmos 44 dígitos em Code 128 existe e chega aqui — sem
+# ele na lista, o boleto sai como "nenhum código encontrado". Restringir ainda
+# vale: menos formato é menos ruído e varredura mais rápida.
+FORMATOS_PADRAO = "ITF,Code128,QRCode"
 
 
 @dataclass(frozen=True)

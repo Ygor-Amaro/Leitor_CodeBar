@@ -15,8 +15,23 @@ from .digito_verificador import (
     Modulo11Arrecadacao,
     Modulo11Cobranca,
 )
-from .excecoes import CodigoInvalidoError, DocumentoIlegivelError, LeitorCbError
+from .excecoes import (
+    CodigoInvalidoError,
+    DocumentoIlegivelError,
+    LeitorCbError,
+    PaginaInexistenteError,
+    RecorteInvalidoError,
+)
 from .fabrica import FabricaConversor
+from .lotes import (
+    DocumentoDoLote,
+    EstadoLote,
+    LeituraDoLote,
+    Lote,
+    Recorte,
+    ResumoLote,
+    validar_zoom,
+)
 from .models import (
     CodigoBarras,
     LinhaDigitavel,
@@ -33,15 +48,24 @@ __all__ = [
     "ConversorArrecadacao",
     "ConversorCobranca",
     "ConversorLinhaDigitavel",
+    "DocumentoDoLote",
     "DocumentoIlegivelError",
+    "EstadoLote",
     "FabricaConversor",
+    "LeituraDoLote",
     "LeitorCbError",
     "LinhaDigitavel",
+    "Lote",
     "Modulo10",
     "Modulo11Arrecadacao",
     "Modulo11Cobranca",
+    "PaginaInexistenteError",
     "PixPayload",
+    "Recorte",
+    "RecorteInvalidoError",
     "ResultadoLeitura",
+    "ResumoLote",
     "StatusLeitura",
     "TipoDocumento",
+    "validar_zoom",
 ]

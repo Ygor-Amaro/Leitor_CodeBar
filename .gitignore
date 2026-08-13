@@ -181,3 +181,12 @@ pyrightconfig.json
 data/input/*
 data/output/*
 !data/**/.gitkeep
+
+# Web: banco de histórico e a área temporária dos envios do navegador.
+data/uploads/
+data/*.sqlite3
+data/*.sqlite3-wal
+data/*.sqlite3-shm
+
+# Área temporária usada para contornar o "Acesso negado" do uv sob OneDrive.
+.uvtmp/

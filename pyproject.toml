@@ -6,20 +6,36 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "dotenv>=0.9.9",
+    "fastapi>=0.115",
+    "jinja2>=3.1",
     "numpy>=2.5.1",
     "opencv-python>=5.0.0.93",
     "pymupdf>=1.28.0",
+    "python-multipart>=0.0.20",
+    "uvicorn>=0.34",
     "zxing-cpp>=3.1.1",
 ]
 
 [project.scripts]
 leitor-cb = "leitor_cb.adapters.cli:main"
+leitor-cb-web = "leitor_cb.adapters.api.servidor:main"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28",
     "pytest>=8.0",
     "ruff>=0.16.1",
+    "taskipy>=1.14",
 ]
+
+# Atalhos: `uv run task <nome>`. `uv run task --list` mostra todos.
+[tool.taskipy.tasks]
+web = { cmd = "leitor-cb-web", help = "Sobe o servidor em http://127.0.0.1:8000" }
+ler = { cmd = "leitor-cb", help = "Lê data/input e grava o CSV em data/output" }
+testes = { cmd = "pytest", help = "Roda a suíte" }
+lint = { cmd = "ruff check .", help = "Confere o estilo" }
+arrumar = { cmd = "ruff check . --fix", help = "Corrige o que o ruff sabe corrigir" }
+conferir = { cmd = "task lint && task testes", help = "Lint e suíte, antes de commitar" }
 
 [build-system]
 requires = ["hatchling"]

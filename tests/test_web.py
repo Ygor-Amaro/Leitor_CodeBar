@@ -222,6 +222,43 @@ def test_arquivo_invalido_no_htmx_volta_fragmento_html(cliente):
     assert "não é um PDF" in resposta.text
 
 
+def test_erro_em_navegacao_devolve_pagina_com_caminho_de_volta(cliente):
+    """Link antigo de lote já apagado é o caso comum — e mostrava JSON cru."""
+    resposta = cliente.get("/lotes/naoexiste", headers={"accept": "text/html"})
+
+    assert resposta.status_code == 404
+    assert resposta.headers["content-type"].startswith("text/html")
+    assert "Voltar ao início" in resposta.text
+
+
+def test_api_responde_json_mesmo_para_quem_aceita_html(cliente):
+    """`/api` é contrato: cliente que erra a rota precisa da mensagem, não da tela."""
+    resposta = cliente.get("/api/lotes/naoexiste", headers={"accept": "text/html"})
+
+    assert resposta.status_code == 404
+    assert resposta.json()["erro"]
+
+
+def test_painel_em_andamento_se_marca_como_pedido_de_fundo(tmp_path, executor):
+    """A marca é o que impede um erro de um segundo de matar o acompanhamento:
+    sem ela o alerta substituiria o painel e levaria o hx-trigger junto."""
+    with montar(tmp_path, ExecutorParado()) as cliente:
+        resposta = cliente.post("/lotes", files=envio(), headers=HTMX)
+
+    assert "data-repetindo" in resposta.text
+    assert "Sem resposta do servidor" in resposta.text
+
+
+def test_tabela_oferece_copiar_e_filtrar(cliente):
+    identificador = primeiro_lote(cliente)
+
+    resposta = cliente.get(f"/lotes/{identificador}")
+
+    assert "Copiar" in resposta.text
+    assert "Para conferir" in resposta.text
+    assert "data-tabela" in resposta.text
+
+
 # ------------------------------------------------------------ recorte manual
 
 
@@ -287,6 +324,65 @@ def test_releitura_sem_area_marcada_le_a_pagina_inteira(cliente):
     )
 
     assert "Resultado da página inteira" in resposta.text
+
+
+def test_releitura_de_pagina_inteira_leva_o_zoom_da_tela(tmp_path, executor):
+    """O botão fica ao lado dos controles de zoom e a dica manda usá-los.
+
+    Rasterizar num zoom fixo tornaria o aumento decorativo — e, pior, faria a
+    releitura substituir a página enxergando menos que a varredura automática.
+    """
+    processador = ProcessadorFalso()
+    with montar(tmp_path, executor, processador) as cliente:
+        identificador = primeiro_lote(cliente)
+
+        cliente.post(
+            f"/lotes/{identificador}/documentos/1/paginas/1/releitura",
+            data={"zoom": "4.0", "x": "0", "y": "0", "largura": "0", "altura": "0"},
+            headers=HTMX,
+        )
+
+    assert processador.renderizacoes[-1][1:] == (1, 4.0)
+
+
+def test_api_releitura_de_pagina_inteira_aceita_o_zoom(tmp_path, executor):
+    processador = ProcessadorFalso()
+    with montar(tmp_path, executor, processador) as cliente:
+        identificador = primeiro_lote(cliente)
+
+        resposta = cliente.post(
+            f"/api/lotes/{identificador}/documentos/1/paginas/1/releitura?zoom=3.0"
+        )
+
+    assert resposta.status_code == 200
+    assert processador.renderizacoes[-1][1:] == (1, 3.0)
+
+
+def test_releitura_vazia_avisa_que_nada_mudou(tmp_path, executor):
+    """A tela dizia "O relatório do lote foi atualizado" mesmo sem achar nada —
+    e o relatório tinha mesmo sido sobrescrito, perdendo a leitura boa."""
+    processador = ProcessadorFalso(releitura=[leitura_sem_codigo("boleto.pdf", pagina=1)])
+    with montar(tmp_path, executor, processador) as cliente:
+        identificador = primeiro_lote(cliente)
+
+        resposta = cliente.post(
+            f"/lotes/{identificador}/documentos/1/paginas/1/releitura",
+            data={"zoom": "2.0", "x": "0", "y": "0", "largura": "0", "altura": "0"},
+            headers=HTMX,
+        )
+
+    assert resposta.status_code == 200
+    assert "o relatório continua como estava" in resposta.text
+    assert "HX-Trigger" not in resposta.headers
+
+
+def test_tela_de_recorte_recusa_zoom_fora_da_faixa(cliente):
+    """Sem isto a tela desenharia inteira e só a imagem viria quebrada."""
+    identificador = primeiro_lote(cliente)
+
+    resposta = cliente.get(f"/lotes/{identificador}/documentos/1/paginas/1?zoom=99")
+
+    assert resposta.status_code == 400
 
 
 def test_api_releitura_com_recorte(cliente):

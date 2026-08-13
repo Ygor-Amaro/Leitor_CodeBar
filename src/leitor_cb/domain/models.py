@@ -66,10 +66,9 @@ class CodigoBarras:
     def identificador_valor_valido(self) -> bool:
         """Só restringe arrecadação — em cobrança o 3º dígito não tem esse papel.
 
-        Fora de 6/7/8/9 não dá para saber qual Módulo o emissor usou: a
-        `calculadora_arrecadacao` chuta o de 11, e o DV geral passa a ser
-        conferido pelo mesmo chute — logo, não detecta o próprio erro. Daí a
-        checagem precisar ser explícita.
+        Fora de 6/7/8/9 não se sabe qual Módulo o emissor usou: a
+        `calculadora_arrecadacao` chuta o de 11 e o DV geral é conferido pelo mesmo
+        chute, sem chance de detectar o próprio erro. Daí a checagem explícita.
         """
         return (
             self.tipo is not TipoDocumento.ARRECADACAO
@@ -92,8 +91,7 @@ class CodigoBarras:
     def dv_geral_confere(self) -> bool:
         """Recalcula o DV geral sobre os outros 43 dígitos e compara com o lido.
 
-        Serve de rede de proteção contra leitura óptica errada — um dígito
-        trocado quase sempre quebra essa conferência.
+        Rede contra leitura óptica errada: um dígito trocado quase sempre quebra.
         """
         if self.tipo is TipoDocumento.ARRECADACAO:
             base = self.digitos[:3] + self.digitos[4:]
@@ -107,8 +105,7 @@ class CodigoBarras:
     def motivo_de_desconfianca(self) -> str | None:
         """Por que esta leitura não merece confiança, ou None se estiver coerente.
 
-        Consultivo, como o `dv_geral_confere`: quem chama sinaliza a linha para
-        conferência manual, nunca a descarta.
+        Consultivo: quem chama sinaliza a linha para conferência, nunca a descarta.
         """
         if not self.identificador_valor_valido:
             return (
@@ -240,3 +237,16 @@ class ResultadoLeitura:
     def exige_atencao(self) -> bool:
         """Linhas que o operador precisa olhar antes de pagar."""
         return self.status is not StatusLeitura.SUCESSO or self.dv_ok is False
+
+    @property
+    def linha_formatada(self) -> str:
+        """A linha com a máscara de leitura; a crua fica em `linha_digitavel`.
+
+        Mora no domínio porque tela e API mostram o mesmo número: uma cópia da
+        regra em cada adaptador vira duas máscaras diferentes. PIX não tem máscara.
+        """
+        if not self.linha_digitavel or self.tipo is None:
+            return self.linha_digitavel
+        if self.tipo is TipoDocumento.PIX:
+            return self.linha_digitavel
+        return LinhaDigitavel(self.linha_digitavel, self.tipo).formatada()

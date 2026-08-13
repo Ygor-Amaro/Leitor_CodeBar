@@ -8,9 +8,15 @@ from typing import Protocol
 
 import numpy as np
 
-from ..domain.excecoes import CodigoInvalidoError, DocumentoIlegivelError
+from ..domain.excecoes import (
+    CodigoInvalidoError,
+    DocumentoIlegivelError,
+    PaginaInexistenteError,
+    RecorteInvalidoError,
+)
 from ..domain.fabrica import FabricaConversor
-from ..domain.models import CodigoBarras, PixPayload, ResultadoLeitura
+from ..domain.lotes import Recorte
+from ..domain.models import CodigoBarras, PixPayload, ResultadoLeitura, StatusLeitura
 from .decodificador import CodigoDetectado, Decodificador
 from .renderizador import RenderizadorPagina
 
@@ -20,8 +26,7 @@ ObservadorResultado = Callable[[ResultadoLeitura], None]
 
 
 class SeletorRoi(Protocol):
-    """Porta do recorte manual — implementada na camada de adaptadores porque
-    depende de interface gráfica."""
+    """Porta do recorte manual. Fica nos adaptadores por depender de GUI."""
 
     def selecionar(self, imagem: np.ndarray, titulo: str) -> np.ndarray | None:
         """Devolve o recorte escolhido pelo operador, ou None se ele pular."""
@@ -31,9 +36,8 @@ class SeletorRoi(Protocol):
 class ProcessadorDocumento:
     """Encadeia renderização, decodificação e conversão, página a página.
 
-    Recebe todas as dependências pelo construtor: em teste, entram dublês; em
-    produção, PyMuPDF e zxing-cpp. É o que torna o pipeline verificável sem PDF
-    e sem janela gráfica.
+    Dependências pelo construtor: dublês em teste, PyMuPDF e zxing-cpp em
+    produção. É o que torna o pipeline verificável sem PDF e sem janela.
     """
 
     def __init__(
@@ -57,10 +61,9 @@ class ProcessadorDocumento:
         caminho: Path,
         ao_processar: ObservadorResultado | None = None,
     ) -> list[ResultadoLeitura]:
-        """Lê um documento inteiro e devolve uma linha de resultado por código.
+        """Lê o documento inteiro, uma linha de resultado por código.
 
-        Falha de um arquivo não interrompe o lote: vira um resultado com status
-        de erro.
+        Falha de arquivo não interrompe o lote: vira resultado com status de erro.
         """
         arquivo = Path(caminho).name
         resultados: list[ResultadoLeitura] = []
@@ -79,6 +82,57 @@ class ProcessadorDocumento:
             registrar(ResultadoLeitura.erro(arquivo, 0, str(erro)))
 
         return resultados
+
+    def total_de_paginas(self, caminho: Path) -> int:
+        """Quantas páginas o documento tem — a tela de recorte navega por elas."""
+        with self._renderizador.abrir(Path(caminho)) as documento:
+            return documento.total_paginas
+
+    def renderizar_pagina(self, caminho: Path, pagina: int, zoom: float) -> np.ndarray:
+        """Rasteriza uma página avulsa, para a tela de recorte da web.
+
+        `pagina` é base 1, como em `ResultadoLeitura`: quem chama é a interface,
+        não o laço interno.
+        """
+        with self._renderizador.abrir(Path(caminho)) as documento:
+            if not 1 <= pagina <= documento.total_paginas:
+                raise PaginaInexistenteError(
+                    f"O documento tem {documento.total_paginas} página(s); "
+                    f"pediram a {pagina}."
+                )
+            return documento.renderizar(pagina - 1, zoom)
+
+    def ler_area(
+        self,
+        arquivo: str,
+        pagina: int,
+        imagem: np.ndarray,
+        recorte: Recorte | None = None,
+    ) -> list[ResultadoLeitura]:
+        """Decodifica uma imagem já renderizada, opcionalmente só num pedaço.
+
+        Reaproveita `_priorizar` e `_interpretar` de propósito: o recorte manual
+        passa pelas mesmas regras FEBRABAN em vez de virar um segundo pipeline.
+        """
+        trecho = _recortar(imagem, recorte) if recorte is not None else imagem
+        detectados = self._decodificador.decodificar(trecho)
+
+        if not detectados:
+            if recorte is None:
+                return [ResultadoLeitura.sem_codigo(arquivo, pagina)]
+            return [
+                ResultadoLeitura(
+                    arquivo=arquivo,
+                    pagina=pagina,
+                    status=StatusLeitura.SEM_CODIGO,
+                    observacao="Nenhum código encontrado na área marcada",
+                )
+            ]
+
+        return [
+            self._interpretar(arquivo, pagina, detectado)
+            for detectado in self._priorizar(detectados)
+        ]
 
     def _processar_pagina(
         self, documento, arquivo: str, numero: int
@@ -99,12 +153,11 @@ class ProcessadorDocumento:
         ]
 
     def _detectar(self, documento, arquivo: str, numero: int) -> list[CodigoDetectado]:
-        """Tenta a leitura automática em zooms crescentes; cai para o recorte
-        manual só se nenhum zoom trouxer algo aproveitável.
+        """Zooms crescentes; recorte manual só se nenhum trouxer nada aproveitável.
 
-        A escalada para quando aparece um código *útil*, não quando aparece um
-        código qualquer: uma nota fiscal costuma ter ITF de rastreio legível já
-        no zoom baixo, e parar nele esconderia o boleto que só sai no zoom alto.
+        A escalada para no primeiro código *útil*, não no primeiro código: nota
+        fiscal costuma ter ITF de rastreio legível no zoom baixo, e parar nele
+        esconderia o boleto que só sai no alto.
         """
         if self._sempre_manual and self._seletor is not None:
             imagem = documento.renderizar(numero, self._zooms[0])
@@ -124,8 +177,8 @@ class ProcessadorDocumento:
             if recorte:
                 return recorte
 
-        # Sem nada aproveitável: devolve o que houver para virar pendência
-        # explícita no relatório, em vez de sumir como "sem código".
+        # Nada aproveitável: devolve o ruído para virar pendência explícita, em
+        # vez de sumir como "sem código".
         return ruido
 
     def _detectar_manual(
@@ -139,11 +192,8 @@ class ProcessadorDocumento:
 
     @staticmethod
     def _priorizar(detectados: Sequence[CodigoDetectado]) -> list[CodigoDetectado]:
-        """Descarta ruído quando a página também trouxe um código utilizável.
-
-        Uma nota fiscal pode ter outros códigos ITF impressos; se algum for um
-        boleto válido ou um QR, só esses interessam.
-        """
+        """Descarta o ruído quando a página também trouxe um código utilizável —
+        nota fiscal costuma ter outros ITF impressos."""
         uteis = [detectado for detectado in detectados if _eh_util(detectado)]
         return uteis or list(detectados)
 
@@ -163,12 +213,30 @@ class ProcessadorDocumento:
 
 
 def _eh_util(detectado: CodigoDetectado) -> bool:
-    """Um QR (PIX) ou um código de barras no formato FEBRABAN — o resto é ruído.
+    """Um QR (PIX) ou um código FEBRABAN — o resto é ruído.
 
-    Mesmo critério usado para decidir se vale escalar o zoom e para filtrar a
-    página; manter os dois juntos evita que divirjam.
+    Um critério só para escalar o zoom e para filtrar a página, senão divergem.
     """
     return detectado.eh_qrcode or _eh_codigo_barras_valido(detectado.texto)
+
+
+def _recortar(imagem: np.ndarray, recorte: Recorte) -> np.ndarray:
+    """Fatia a área marcada, presa aos limites da imagem.
+
+    Arrastar o mouse para fora da página é gesto natural; sem prender, a fatia
+    sairia vazia e o erro apareceria disfarçado de "nenhum código encontrado".
+    """
+    altura_total, largura_total = imagem.shape[:2]
+
+    inicio_x = min(recorte.x, largura_total)
+    inicio_y = min(recorte.y, altura_total)
+    fim_x = min(inicio_x + recorte.largura, largura_total)
+    fim_y = min(inicio_y + recorte.altura, altura_total)
+
+    if fim_x <= inicio_x or fim_y <= inicio_y:
+        raise RecorteInvalidoError("A área marcada está fora da página.")
+
+    return imagem[inicio_y:fim_y, inicio_x:fim_x]
 
 
 def _eh_codigo_barras_valido(texto: str) -> bool:

@@ -124,8 +124,8 @@ def montar_processador(config: Configuracao) -> ProcessadorDocumento:
 def _proteger_console() -> None:
     """Impede que um acento derrube o lote em consoles Windows não-UTF-8.
 
-    Mantém a codificação nativa do terminal e só troca o tratamento de erro,
-    para não introduzir mojibake onde hoje a exibição está correta.
+    Só troca o tratamento de erro, mantendo a codificação nativa: mudá-la traria
+    mojibake onde hoje a exibição está correta.
     """
     for fluxo in (sys.stdout, sys.stderr):
         reconfigurar = getattr(fluxo, "reconfigure", None)

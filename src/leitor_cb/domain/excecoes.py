@@ -15,3 +15,11 @@ class CodigoInvalidoError(LeitorCbError):
 
 class DocumentoIlegivelError(LeitorCbError):
     """O arquivo não pôde ser aberto ou renderizado."""
+
+
+class PaginaInexistenteError(LeitorCbError):
+    """Pediram uma página que o documento não tem."""
+
+
+class RecorteInvalidoError(LeitorCbError):
+    """A área marcada na tela não descreve um retângulo utilizável."""

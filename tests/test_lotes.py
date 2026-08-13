@@ -15,8 +15,9 @@ from conftest import (
     leitura_sem_codigo,
 )
 
-from leitor_cb.domain import EstadoLote, Recorte, StatusLeitura
+from leitor_cb.domain import EstadoLote, Recorte, RecorteInvalidoError, StatusLeitura
 from leitor_cb.services import (
+    ZOOM_RELEITURA_PADRAO,
     ArmazenamentoEmDisco,
     ArquivoRecebido,
     ArquivosIndisponiveisError,
@@ -197,6 +198,98 @@ def test_releitura_sem_recorte_le_a_pagina_inteira(tmp_path, executor):
     servico.reler_pagina(identificador, 1, 1, None)
 
     assert processador.areas == [None]
+
+
+def test_releitura_de_pagina_inteira_usa_o_zoom_escolhido(tmp_path, executor):
+    """Sem retângulo, quem manda no zoom é o que o operador ampliou na tela."""
+    servico, identificador, processador = montar_com_pendencia(tmp_path, executor)
+
+    servico.reler_pagina(identificador, 1, 1, None, zoom=4.0)
+
+    assert processador.renderizacoes[-1][1:] == (1, 4.0)
+
+
+def test_releitura_de_pagina_inteira_sem_zoom_cai_no_padrao(tmp_path, executor):
+    """O padrão acompanha o primeiro zoom da varredura automática.
+
+    Abaixo dele a releitura enxergaria menos do que a passada que já falhou — e,
+    como ela substitui a página, trocaria uma leitura boa por "nenhum código
+    encontrado".
+    """
+    servico, identificador, processador = montar_com_pendencia(tmp_path, executor)
+
+    servico.reler_pagina(identificador, 1, 1, None)
+
+    assert processador.renderizacoes[-1][1:] == (1, ZOOM_RELEITURA_PADRAO)
+
+
+def test_releitura_recusa_zoom_fora_da_faixa(tmp_path, executor):
+    servico, identificador, _ = montar_com_pendencia(tmp_path, executor)
+
+    with pytest.raises(RecorteInvalidoError):
+        servico.reler_pagina(identificador, 1, 1, None, zoom=99.0)
+
+
+def test_releitura_escala_o_zoom_ate_achar_o_codigo(tmp_path, executor):
+    """Barra fina não resolve em zoom baixo, e a tela de recorte abre em 2.0.
+
+    Sem a escalada, o operador marcava o código no lugar certo e recebia "nenhum
+    código encontrado" — enxergando menos que a varredura automática, que já
+    tenta 3.0.
+    """
+    processador = ProcessadorFalso(
+        resultados=[leitura_sem_codigo("Boleto.pdf", pagina=1)],
+        releitura=[leitura_boleto("Boleto.pdf")],
+        zoom_minimo=3.0,
+    )
+    servico = montar(tmp_path, executor, processador)
+    identificador = servico.criar([recebido("Boleto.pdf")]).identificador
+
+    (resultado,) = servico.reler_pagina(
+        identificador, 1, 1, Recorte(x=10, y=20, largura=40, altura=15, zoom=2.0)
+    )
+
+    assert resultado.status is StatusLeitura.SUCESSO
+    assert [zoom for _, _, zoom in processador.renderizacoes] == [2.0, 3.0]
+
+
+def test_escalada_reposiciona_o_recorte_no_novo_zoom(tmp_path, executor):
+    """O retângulo veio em pixels do zoom marcado; sem converter, a segunda
+    tentativa recortaria outro pedaço da página."""
+    processador = ProcessadorFalso(
+        releitura=[leitura_boleto("Boleto.pdf")], zoom_minimo=4.0
+    )
+    servico = montar(tmp_path, executor, processador)
+    identificador = servico.criar([recebido("Boleto.pdf")]).identificador
+
+    servico.reler_pagina(
+        identificador, 1, 1, Recorte(x=10, y=20, largura=40, altura=15, zoom=2.0)
+    )
+
+    assert processador.areas == [
+        Recorte(x=10, y=20, largura=40, altura=15, zoom=2.0),
+        Recorte(x=15, y=30, largura=60, altura=22, zoom=3.0),
+        Recorte(x=20, y=40, largura=80, altura=30, zoom=4.0),
+    ]
+
+
+def test_releitura_vazia_nao_apaga_a_leitura_que_existia(tmp_path, executor):
+    """Apagar uma leitura boa por causa de uma tentativa vazia é perda de dado
+    sem desfazer — e a tentativa pode ter falhado só pelo zoom."""
+    processador = ProcessadorFalso(
+        resultados=[leitura_boleto("Boleto.pdf")],
+        releitura=[leitura_sem_codigo("Boleto.pdf", pagina=1)],
+    )
+    servico = montar(tmp_path, executor, processador)
+    identificador = servico.criar([recebido("Boleto.pdf")]).identificador
+    csv_antes = servico.obter(identificador).nome_csv
+
+    (resultado,) = servico.reler_pagina(identificador, 1, 1, None)
+
+    assert resultado.status is StatusLeitura.SEM_CODIGO
+    (guardado,) = servico.resultados(identificador)
+    assert guardado.status is StatusLeitura.SUCESSO
+    assert servico.obter(identificador).nome_csv == csv_antes
 
 
 def test_releitura_usa_o_nome_que_o_operador_enviou(tmp_path, executor):

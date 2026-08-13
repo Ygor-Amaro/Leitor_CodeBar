@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from ..domain.models import LinhaDigitavel, ResultadoLeitura, StatusLeitura, TipoDocumento
+from ..domain.models import ResultadoLeitura, StatusLeitura, TipoDocumento
 
 COLUNAS = (
     "arquivo",
@@ -47,11 +47,10 @@ class ExportadorConsole:
             print(f"{prefixo} QR Code (PIX):\n{resultado.linha_digitavel}")
             return
 
-        linha = LinhaDigitavel(resultado.linha_digitavel, resultado.tipo)
         # O motivo vem pronto do domínio: DV divergente e identificador de valor
-        # fora do padrão são alertas diferentes e o operador precisa saber qual.
+        # fora do padrão são alertas diferentes, e o operador precisa saber qual.
         alerta = "" if resultado.dv_ok else f"  <-- {resultado.observacao}"
-        print(f"{prefixo} Linha digitável: {linha.formatada()}{alerta}")
+        print(f"{prefixo} Linha digitável: {resultado.linha_formatada}{alerta}")
 
     def exportar(self, resultados: Sequence[ResultadoLeitura]) -> None:
         """Resumo final do lote."""
@@ -76,8 +75,8 @@ class ExportadorConsole:
 class ExportadorCsv:
     """Grava o relatório em CSV.
 
-    Separador `;` e encoding `utf-8-sig` para que o Excel em português abra o
-    arquivo com duplo clique, sem assistente de importação e sem quebrar acento.
+    `;` e `utf-8-sig` para o Excel em português abrir com duplo clique, sem
+    assistente de importação e sem quebrar acento.
     """
 
     def __init__(self, diretorio: Path, prefixo: str = "leitura") -> None:
@@ -101,8 +100,8 @@ class ExportadorCsv:
         return destino
 
     def _caminho_livre(self) -> Path:
-        """Nome ainda não usado. O carimbo tem resolução de segundos, então dois
-        lotes seguidos colidiriam e o primeiro relatório se perderia calado."""
+        """Nome ainda não usado: o carimbo tem resolução de segundos, e dois lotes
+        seguidos perderiam o primeiro relatório sem avisar."""
         carimbo = f"{datetime.now():%Y%m%d_%H%M%S}"
         destino = self._diretorio / f"{self._prefixo}_{carimbo}.csv"
 
@@ -130,15 +129,14 @@ class ExportadorCsv:
 def _texto_seguro(valor: str) -> str:
     """Deixa o valor inofensivo para o Excel.
 
-    Dois riscos, porque o CSV é feito para ser aberto com duplo clique: número
-    longo virar notação científica (some dígito do código) e texto virar fórmula
-    viva. O conteúdo vem de dentro do PDF — payload de PIX, nome de arquivo,
-    leitura falha — e portanto não é confiável.
+    O arquivo é feito para abrir com duplo clique e o conteúdo vem do PDF — nome
+    de arquivo, payload de PIX, leitura falha. Dois riscos: número longo virar
+    notação científica (perde dígito do código) e texto virar fórmula viva.
     """
     if valor.isdigit():
         return f"\t{valor}"
     if valor.startswith(INICIADORES_DE_FORMULA):
-        # Apóstrofo é a neutralização que o Excel entende; fica visível na
-        # célula, o que também serve de aviso de que o conteúdo era estranho.
+        # O apóstrofo é a neutralização que o Excel entende, e fica visível na
+        # célula — o que também avisa que o conteúdo era estranho.
         return f"'{valor}"
     return valor
