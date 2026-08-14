@@ -246,3 +246,39 @@ def test_listar_respeita_o_limite(tmp_path):
         repo.criar(replace(novo_lote(f"lote{indice}"), criado_em=AGORA + timedelta(minutes=indice)))
 
     assert len(repo.listar(limite=2)) == 2
+
+
+# ------------------------------------------------- lotes deixados pela metade
+
+
+def test_marcar_interrompidos_fecha_o_que_ficou_em_andamento(tmp_path):
+    repo = repositorio(tmp_path)
+    repo.criar(replace(novo_lote("na_fila"), estado=EstadoLote.PENDENTE))
+    repo.criar(replace(novo_lote("rodando"), estado=EstadoLote.PROCESSANDO))
+
+    fechados = repo.marcar_interrompidos("servidor reiniciado")
+
+    assert sorted(fechados) == ["na_fila", "rodando"]
+    for identificador in ("na_fila", "rodando"):
+        lote = repo.obter(identificador)
+        assert lote.estado is EstadoLote.FALHOU
+        assert lote.observacao == "servidor reiniciado"
+
+
+def test_marcar_interrompidos_nao_toca_em_lote_terminado(tmp_path):
+    """Concluído e falho já são finais — reescrevê-los apagaria o nome do CSV
+    de um relatório que está em disco e funcionando."""
+    repo = repositorio(tmp_path)
+    repo.criar(
+        replace(novo_lote("pronto"), estado=EstadoLote.CONCLUIDO, nome_csv="lote_x.csv")
+    )
+    repo.criar(replace(novo_lote("ruim"), estado=EstadoLote.FALHOU, observacao="disco cheio"))
+
+    assert repo.marcar_interrompidos("servidor reiniciado") == []
+
+    assert repo.obter("pronto").nome_csv == "lote_x.csv"
+    assert repo.obter("ruim").observacao == "disco cheio"
+
+
+def test_marcar_interrompidos_sem_nada_pendente(tmp_path):
+    assert repositorio(tmp_path).marcar_interrompidos("servidor reiniciado") == []

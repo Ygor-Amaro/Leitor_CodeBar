@@ -1,6 +1,6 @@
 [project]
 name = "leitor-cb"
-version = "0.2.0"
+version = "0.3.0"
 description = "Leitor de códigos de barras FEBRABAN e QR Codes PIX em PDFs de pagamento"
 readme = "README.md"
 requires-python = ">=3.14"

@@ -11,10 +11,11 @@ services:
     restart: unless-stopped
 
     ports:
-      # Só a máquina do servidor enxerga. Para liberar à rede do escritório,
-      # troque por "8000:8000" — a partir daí qualquer um na rede lê os boletos,
-      # então faça isso conscientemente.
-      - "127.0.0.1:8000:8000"
+      # Publicado para a rede do escritório inteira, por decisão explícita: não há
+      # login, então qualquer máquina que alcance esta porta lê todos os boletos
+      # enviados, baixa todos os relatórios e pode descartar os PDFs de outra
+      # pessoa. Para recuar, volte a "127.0.0.1:8000:8000".
+      - "8000:8000"
 
     volumes:
       # Bind mount, não volume nomeado: o time precisa alcançar os CSVs de
@@ -30,9 +31,24 @@ services:
       LEITOR_CB_TAMANHO_MAXIMO_MB: "25"
       LEITOR_CB_MAXIMO_ARQUIVOS: "50"
 
+    # O encerramento espera o lote em andamento terminar (`ServicoLotes.encerrar`).
+    # Nos 10s padrão do Docker, um `compose down` no meio de um lote grande vira
+    # SIGKILL e deixa o registro preso — que é justamente o que a varredura de
+    # `fechar_interrompidos` existe para limpar depois.
+    stop_grace_period: 5m
+
     # Rasterizar página é caro em memória; o teto evita que um PDF enorme
     # engula o servidor inteiro, e a aplicação já lê um lote por vez.
-    deploy:
-      resources:
-        limits:
-          memory: 2g
+    # `mem_limit` e não `deploy.resources`: aquele é sintaxe de Swarm e depende da
+    # versão do Compose para valer. Confira com
+    # `docker inspect leitor-cb --format '{{.HostConfig.Memory}}'` — 0 significa
+    # sem teto.
+    mem_limit: 2g
+
+    # O servidor fica meses ligado e o json-file cresce sem limite até encher o
+    # disco — que é o mesmo disco do banco e dos relatórios.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

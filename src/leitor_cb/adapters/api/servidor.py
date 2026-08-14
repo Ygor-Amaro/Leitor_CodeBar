@@ -18,7 +18,11 @@ def main() -> int:
         criar_app(config),
         host=config.host,
         port=config.porta,
-        log_level="warning",  # o log da aplicação já sai estruturado
+        # "info" liga o log de acesso do uvicorn. Sem login no servidor, ele é o
+        # único registro de quem baixou qual relatório de contas a pagar — o
+        # `RegistradorJson` conta o que a aplicação fez, não quem pediu.
+        log_level="info",
+        access_log=True,
     )
     return 0
 

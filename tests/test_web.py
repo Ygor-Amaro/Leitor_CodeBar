@@ -1,10 +1,13 @@
 """Rotas HTTP — API JSON e telas HTMX — sem PDF de verdade e sem thread."""
 
-from collections.abc import Callable
-from concurrent.futures import Executor, Future
-
 import pytest
-from conftest import PDF_FALSO, ProcessadorFalso, leitura_boleto, leitura_sem_codigo
+from conftest import (
+    PDF_FALSO,
+    ExecutorParado,
+    ProcessadorFalso,
+    leitura_boleto,
+    leitura_sem_codigo,
+)
 from fastapi.testclient import TestClient
 
 from leitor_cb.adapters.api.app import criar_app
@@ -18,17 +21,6 @@ from leitor_cb.services import (
 )
 
 HTMX = {"HX-Request": "true"}
-
-
-class ExecutorParado(Executor):
-    """Aceita o job e não roda nada — deixa o lote parado em 'na fila'.
-
-    É como se testa a tela de progresso: com o executor imediato o lote já
-    nasceria concluído e o estado intermediário nunca apareceria.
-    """
-
-    def submit(self, fn: Callable, /, *args, **kwargs) -> Future:  # type: ignore[override]
-        return Future()
 
 
 def montar(tmp_path, executor, processador=None, **ajustes) -> TestClient:
@@ -453,3 +445,125 @@ def test_envios_em_rajada_sao_barrados(tmp_path, executor):
         resposta = cliente.post("/api/lotes", files=envio())
 
         assert resposta.status_code == 429
+
+
+# ------------------------------------------------------- superfície exposta
+
+
+def test_saude_responde_sem_tocar_no_banco(cliente):
+    """Alvo do HEALTHCHECK do contêiner."""
+    resposta = cliente.get("/api/saude")
+
+    assert resposta.status_code == 200
+    assert resposta.json() == {"status": "ok"}
+
+
+@pytest.mark.parametrize("rota", ["/docs", "/redoc", "/openapi.json"])
+def test_swagger_esta_fora_do_ar(cliente, rota):
+    """O servidor fica aberto à rede sem login; o /docs seria o mapa clicável
+    de tudo, inclusive do DELETE que apaga os PDFs de outra pessoa."""
+    assert cliente.get(rota).status_code == 404
+
+
+def test_lote_interrompido_e_encerrado_na_subida(tmp_path, executor):
+    """Reinício no meio da leitura não deixa lote preso em 'processando'.
+
+    O primeiro cliente envia e o executor parado deixa o lote na fila, como um
+    servidor derrubado faria; o segundo é a subida seguinte.
+    """
+    with montar(tmp_path, ExecutorParado()) as antes:
+        antes.post("/api/lotes", files=envio())
+        identificador = antes.get("/api/lotes").json()[0]["identificador"]
+
+    with montar(tmp_path, executor) as depois:
+        lote = depois.get(f"/api/lotes/{identificador}").json()["lote"]
+        assert lote["estado"] == "falhou"
+
+        # E, com isso, a tela para de pedir o andamento a cada segundo.
+        painel = depois.get(f"/lotes/{identificador}/painel", headers=HTMX)
+        assert "every 1s" not in painel.text
+
+
+# ------------------------------------------------------ teto de bytes do envio
+
+
+def envio_grande(megabytes: int, nome: str = "grande.pdf"):
+    """PDF válido na assinatura e do tamanho pedido."""
+    recheio = b"0" * (megabytes * 1024 * 1024)
+    return [("arquivos", (nome, PDF_FALSO + recheio, "application/pdf"))]
+
+
+def test_envio_acima_do_teto_total_e_recusado(tmp_path, executor):
+    with montar(tmp_path, executor, tamanho_maximo_envio_mb=2) as cliente:
+        resposta = cliente.post("/api/lotes", files=envio_grande(3))
+
+        assert resposta.status_code == 413
+        assert "no total" in resposta.json()["erro"]
+
+
+def test_envio_grande_nao_deixa_arquivo_em_disco(tmp_path, executor):
+    """O corte acontece antes de o corpo virar PDF gravado."""
+    with montar(tmp_path, executor, tamanho_maximo_envio_mb=2) as cliente:
+        cliente.post("/api/lotes", files=envio_grande(3))
+
+        uploads = tmp_path / "dados" / "uploads"
+        gravados = list(uploads.rglob("*.pdf")) if uploads.exists() else []
+        assert gravados == []
+
+
+def test_soma_dos_arquivos_conta_para_o_teto(tmp_path, executor):
+    """Nenhum arquivo sozinho estoura; juntos, sim — que é o caso que o teto por
+    arquivo não pegava."""
+    with montar(tmp_path, executor, tamanho_maximo_envio_mb=3) as cliente:
+        resposta = cliente.post(
+            "/api/lotes",
+            files=envio_grande(2, "a.pdf") + envio_grande(2, "b.pdf"),
+        )
+
+        assert resposta.status_code == 413
+
+
+def test_envio_dentro_do_teto_passa(tmp_path, executor):
+    with montar(tmp_path, executor, tamanho_maximo_envio_mb=5) as cliente:
+        assert cliente.post("/api/lotes", files=envio_grande(1)).status_code == 201
+
+
+def test_teto_estourado_pelo_htmx_volta_fragmento_html(tmp_path, executor):
+    """A tela precisa do alerta em HTML; um JSON cru apareceria cru."""
+    with montar(tmp_path, executor, tamanho_maximo_envio_mb=2) as cliente:
+        resposta = cliente.post("/lotes", files=envio_grande(3), headers=HTMX)
+
+        assert resposta.status_code == 413
+        assert resposta.headers["content-type"].startswith("text/html")
+        assert "no total" in resposta.text
+
+
+def test_teto_nao_atrapalha_leitura(cliente):
+    """GET não tem corpo: o middleware não pode encostar nele."""
+    assert cliente.get("/api/saude").status_code == 200
+    assert cliente.get("/").status_code == 200
+
+
+def test_envio_sem_content_length_tambem_e_cortado(tmp_path, executor):
+    """Sem o cabeçalho não há o que conferir de antemão: vale a soma do que chega.
+
+    É o caminho que um cliente hostil usaria para escapar da conferência barata —
+    daí a segunda defesa. O status aqui é 400 e não 413 porque o corte acontece
+    dentro do parser do corpo, e o FastAPI converte o que estoura ali; o que
+    importa é que nada foi para o disco.
+    """
+    def corpo_infinito():
+        for _ in range(50):
+            yield b"x" * (1024 * 1024)
+
+    with montar(tmp_path, executor, tamanho_maximo_envio_mb=2) as cliente:
+        resposta = cliente.post(
+            "/api/lotes",
+            content=corpo_infinito(),
+            headers={"content-type": "multipart/form-data; boundary=xyz"},
+        )
+
+        assert resposta.status_code == 400
+
+        uploads = tmp_path / "dados" / "uploads"
+        assert (list(uploads.rglob("*.pdf")) if uploads.exists() else []) == []

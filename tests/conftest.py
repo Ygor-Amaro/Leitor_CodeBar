@@ -39,6 +39,18 @@ class ExecutorImediato(Executor):
         return futuro
 
 
+class ExecutorParado(Executor):
+    """Aceita o job e não roda nada — deixa o lote parado em 'na fila'.
+
+    É como se testa a tela de progresso: com o executor imediato o lote já
+    nasceria concluído e o estado intermediário nunca apareceria. Serve também
+    para simular o lote que o processo anterior deixou pela metade.
+    """
+
+    def submit(self, fn: Callable, /, *args, **kwargs) -> Future:  # type: ignore[override]
+        return Future()
+
+
 class ProcessadorFalso:
     """Responde listas fixas de leituras, ignorando o arquivo.
 

@@ -44,7 +44,8 @@ COPY --from=construcao --chown=leitor:leitor /app/.venv /app/.venv
 
 # Criadas aqui, com dono certo, porque a aplicação as escreve na primeira
 # execução e um volume vazio herda o dono do diretório que a imagem já tem.
-RUN install -d -o leitor -g leitor /app/data /app/data/uploads /app/data/output
+RUN install -d -o leitor -g leitor \
+    /app/data /app/data/input /app/data/uploads /app/data/output
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
@@ -56,12 +57,20 @@ ENV PATH="/app/.venv/bin:$PATH" \
 # quem controla a exposição é o mapeamento de portas do compose, não isto.
 ENV LEITOR_CB_HOST=0.0.0.0
 
+# Falha no build em vez de crash loop no servidor: o cv2 liga contra as libs
+# instaladas lá em cima, e uma que faltasse só apareceria como contêiner
+# reiniciando sem parar, longe daqui. Depende do PATH acima para achar o venv.
+RUN python -c "import cv2, fitz, zxingcpp"
+
 USER leitor
 
 EXPOSE 8000
 
 # Sem curl na imagem slim; o próprio Python da aplicação faz a checagem.
+# /api/saude não toca no banco e a porta vem do ambiente: apontar para /api/lotes
+# abria duas conexões SQLite a cada 30s e marcava o contêiner como doente numa
+# disputa de trava passageira, e a porta fixa mentia se LEITOR_CB_PORTA mudasse.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/lotes', timeout=4)"
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('LEITOR_CB_PORTA', '8000') + '/api/saude', timeout=4)"
 
 CMD ["leitor-cb-web"]
