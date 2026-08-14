@@ -30,6 +30,13 @@ services:
       LEITOR_CB_RETENCAO_HORAS: "24"
       LEITOR_CB_TAMANHO_MAXIMO_MB: "25"
       LEITOR_CB_MAXIMO_ARQUIVOS: "50"
+      # O teto que de fato protege o disco, declarado junto dos outros dois
+      # porque sozinhos eles mentem: 25 × 50 sugere 1,25 GB, e o que vale é este.
+      # Os dois de cima só são cobrados depois que o corpo inteiro já foi lido e
+      # derramado em disco temporário; este o `LimiteDeCorpo` recusa antes disso.
+      # Repete o padrão do código de propósito — mudar um lá sem mudar aqui não
+      # altera nada em execução, e é essa a intenção.
+      LEITOR_CB_TAMANHO_MAXIMO_ENVIO_MB: "200"
 
     # A porta está aberta para a rede do escritório sem login, então o que der
     # para fechar de graça fica fechado. O processo já roda como `leitor`
@@ -70,8 +77,16 @@ services:
 
     # O servidor fica meses ligado e o json-file cresce sem limite até encher o
     # disco — que é o mesmo disco do banco e dos relatórios.
+    #
+    # 10 arquivos, não 3: sem login, o access log do uvicorn é o único registro
+    # de quem baixou qual relatório de contas a pagar, e o teto anterior de 30 MB
+    # não foi escolhido pensando nisso. O que enche esse espaço não é o que
+    # interessa — `_painel.html` pede progresso a cada 1s enquanto o lote roda,
+    # e esse polling empurra para fora as poucas linhas de
+    # `GET /lotes/.../relatorio.csv` que alguém procuraria meses depois.
+    # 100 MB é o preço de conseguir responder essa pergunta.
     logging:
       driver: json-file
       options:
         max-size: "10m"
-        max-file: "3"
+        max-file: "10"

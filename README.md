@@ -149,7 +149,10 @@ descuido — mas mantenha o serviço numa rede em que isso seja aceitável, e re
 para `"127.0.0.1:8000:8000"` se deixar de ser.
 
 Sem login, o log de acesso do uvicorn é o único registro de quem baixou o quê.
-Ele sai no `docker compose logs`, com rotação em 3 arquivos de 10 MB.
+Ele sai no `docker compose logs`, com rotação em 10 arquivos de 10 MB. São 100 MB
+porque o que enche esse espaço não é o que interessa: a tela de progresso pede
+atualização a cada segundo enquanto o lote roda, e esse polling empurra para fora
+as poucas linhas de download de relatório que alguém procuraria meses depois.
 
 O botão **Copiar** funciona pela rede em HTTP: o navegador reserva a API moderna
 de área de transferência para endereços seguros, e fora deles o sistema cai no
