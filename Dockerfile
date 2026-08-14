@@ -3,10 +3,16 @@
 # Duas etapas: a primeira monta o ambiente virtual com o uv, a segunda leva só
 # o resultado. O uv e o cache de build ficam para trás — a imagem final não
 # precisa saber compilar nada.
+#
+# As tags são fixadas no patch, não em `3.14`/`0.9`. Aquelas continuam recebendo
+# versões novas: dois builds do mesmo commit davam imagens diferentes, e uma
+# quebra de ABI no cv2 apareceria num rebuild qualquer em vez de num commit.
+# Atualizar é edição deliberada aqui — o `RUN python -c "import ..."` lá embaixo
+# é o que checa a troca.
 
-FROM python:3.14-slim AS construcao
+FROM python:3.14.7-slim AS construcao
 
-COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.9.21 /uv /bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -25,7 +31,7 @@ COPY src ./src
 RUN uv sync --frozen --no-dev --no-editable
 
 
-FROM python:3.14-slim
+FROM python:3.14.7-slim
 
 # libgl1/libglib: o `import cv2` do opencv-python liga contra elas mesmo quando
 # nenhuma janela é aberta, e a imagem slim não as traz.
