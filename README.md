@@ -125,12 +125,35 @@ docker compose down            # derruba
 Confira que subiu:
 
 ```bash
-docker compose ps    # precisa aparecer "healthy"
+docker compose ps    # `leitor-cb` precisa aparecer "healthy"
 ```
+
+São dois contêineres: `leitor-cb`, o serviço, e `leitor-cb-autoheal`, que o
+vigia (veja abaixo).
 
 O serviço volta sozinho depois de reinício do servidor (`restart: unless-stopped`)
 e responde em `http://<ip-do-servidor>:8000`. Só a versão web roda no contêiner: a
 CLI abre a janela do OpenCV, que não existe ali.
+
+### O vigia, e o que ele custa
+
+`restart: unless-stopped` reage à *saída do processo*, não ao healthcheck —
+reiniciar contêiner doente é comportamento de Swarm e Kubernetes, não do Docker
+sozinho. Sem ninguém para agir, um uvicorn travado de pé (thread presa numa
+página, deadlock no pool) ficaria marcado `unhealthy` para sempre num servidor
+que ninguém observa. O `autoheal` fecha isso: a cada 30s reinicia quem estiver
+doente, e só olha contêiner com o rótulo `autoheal=true`.
+
+Ele monta o socket do Docker, e **isso equivale a dar root da máquina a esse
+contêiner** — é a troca que qualquer supervisão automática exige. Por isso a
+imagem está fixada em `willfarrell/autoheal:1.2.0`: um `latest` ali seria root do
+servidor mudando sozinho. Para dispensar o vigia, remova o serviço `autoheal` do
+`docker-compose.yml`; o resto continua funcionando, e o healthcheck volta a ser
+só diagnóstico manual.
+
+O reinício respeita os mesmos 5 minutos de tolerância do desligamento normal
+(`AUTOHEAL_STOP_TIMEOUT`), para não matar um lote grande no meio e trocar um
+contêiner travado por um registro preso em "processando".
 
 ### Onde clonar: nunca numa pasta sincronizada
 

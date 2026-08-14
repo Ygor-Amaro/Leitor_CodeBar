@@ -10,6 +10,14 @@ services:
     # se alguém parou de propósito com `docker compose stop`.
     restart: unless-stopped
 
+    # `restart` reage à saída do processo, não ao HEALTHCHECK — reiniciar quem
+    # está `unhealthy` é comportamento de Swarm/Kubernetes, não do Engine. Sem
+    # este rótulo, um uvicorn travado de pé (thread presa numa página, deadlock
+    # no pool) ficaria marcado como doente para sempre e ninguém agiria. Quem lê
+    # o rótulo é o serviço `autoheal` lá embaixo.
+    labels:
+      autoheal: "true"
+
     ports:
       # Publicado para a rede do escritório inteira, por decisão explícita: não há
       # login, então qualquer máquina que alcance esta porta lê todos os boletos
@@ -90,3 +98,53 @@ services:
       options:
         max-size: "10m"
         max-file: "10"
+
+  # Reinicia quem estiver `unhealthy` — é o que faltava para o HEALTHCHECK do
+  # Dockerfile virar recuperação em vez de adjetivo no `docker ps`. Só olha
+  # contêiner com o rótulo `autoheal=true`, então não encosta em mais nada que
+  # rode neste servidor.
+  #
+  # O CUSTO É REAL: montar o socket do Docker dá a este contêiner controle total
+  # do daemon, o que equivale a root na máquina. É a troca que qualquer
+  # supervisão automática de contêiner exige, e é o motivo de a imagem estar
+  # fixada num patch (1.2.0) em vez de `latest` — aqui um `latest` seria root do
+  # servidor mudando sozinho. O socket vai read-write de propósito: reiniciar
+  # contêiner é uma escrita na API, e `:ro` faz o connect() falhar em boa parte
+  # dos kernels.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: leitor-cb-autoheal
+    restart: unless-stopped
+
+    environment:
+      TZ: America/Sao_Paulo
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "30"
+      # Não conta como doente enquanto o processo está subindo. O
+      # `--start-period=15s` do HEALTHCHECK já cobre isso; esta é a folga do lado
+      # de cá, para um boot lento (varredura de `limpar_expirados` e
+      # `fechar_interrompidos`) não virar um laço de reinícios.
+      AUTOHEAL_START_PERIOD: "60"
+      # Casa com o `stop_grace_period: 5m` do serviço. No padrão de 10s, um
+      # reinício automático no meio de um lote grande viraria SIGKILL — trocando
+      # um contêiner travado por um registro preso em `processando`, que é o
+      # problema que `fechar_interrompidos` limpa só no boot seguinte.
+      AUTOHEAL_STOP_TIMEOUT: "300"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    security_opt:
+      - no-new-privileges:true
+
+    # Sem `cap_drop: ALL` aqui, ao contrário do serviço: esta imagem roda como
+    # root e fala com o socket, e restringi-la trocaria um ganho pequeno pelo
+    # risco de a supervisão morrer calada — que é o pior estado possível dela.
+    mem_limit: 64m
+    pids_limit: 64
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"
