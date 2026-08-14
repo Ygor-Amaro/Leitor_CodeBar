@@ -26,9 +26,10 @@ Abra <http://127.0.0.1:8000>, escolha os PDFs, acompanhe o progresso e baixe o
 CSV. Os lotes anteriores ficam listados na mesma página, com link para reabrir o
 relatório.
 
-O servidor escuta só em `127.0.0.1`: nada é publicado na rede do escritório. O
-histórico (situação dos lotes e as leituras) fica num SQLite em
-`data/leitor_cb.sqlite3`.
+Rodando assim, na sua máquina, o servidor escuta só em `127.0.0.1` e nada é
+publicado na rede. No servidor do escritório é diferente — veja
+[Implantação com Docker](#implantação-com-docker). O histórico (situação dos
+lotes e as leituras) fica num SQLite em `data/leitor_cb.sqlite3`.
 
 ### Copiando as linhas para o banco
 
@@ -70,8 +71,10 @@ Para apagar antes, use **Descartar arquivos agora** na tela do lote.
 Descartar não afeta o relatório: o CSV continua disponível para download. O que
 se perde é a possibilidade de recortar aquelas páginas à mão.
 
-Existe também uma API REST, útil para automatizar o envio — documentação
-navegável em <http://127.0.0.1:8000/docs>:
+Existe também uma API REST, útil para automatizar o envio. O `/docs` navegável
+está desligado de propósito — com o servidor aberto à rede e sem login, ele seria
+um mapa clicável de tudo o que está abaixo, inclusive do `DELETE`. Esta tabela é
+a documentação:
 
 | Rota | Para quê |
 | --- | --- |
@@ -82,10 +85,31 @@ navegável em <http://127.0.0.1:8000/docs>:
 | `GET .../documentos/{n}/paginas/{p}/imagem?zoom=2` | Página rasterizada em PNG |
 | `POST .../documentos/{n}/paginas/{p}/releitura?zoom=2` | Relê a página inteira; com corpo `{x, y, largura, altura, zoom}`, só a área marcada |
 | `DELETE /api/lotes/{id}/arquivos` | Descarta os PDFs antes do prazo |
+| `GET /api/saude` | Responde `{"status": "ok"}`; é o alvo do healthcheck do contêiner |
 
-Ajustes por variável de ambiente (ou `.env`): `LEITOR_CB_HOST`,
-`LEITOR_CB_PORTA`, `LEITOR_CB_DADOS`, `LEITOR_CB_TAMANHO_MAXIMO_MB`,
-`LEITOR_CB_MAXIMO_ARQUIVOS`, `LEITOR_CB_RETENCAO_HORAS`.
+### Variáveis de ambiente
+
+Valem para a CLI e para a web. Localmente saem de um `.env` na raiz (que não é
+versionado); no servidor, do `environment:` do `docker-compose.yml` mais o `ENV`
+do `Dockerfile` — o `.env` **não** entra na imagem. Argumentos da linha de
+comando têm precedência sobre todos.
+
+| Variável | Padrão | Para quê |
+| --- | --- | --- |
+| `LEITOR_CB_ENTRADA` | `data/input` | Pasta (ou PDF) de onde a CLI lê |
+| `LEITOR_CB_SAIDA` | `<LEITOR_CB_DADOS>/output` | Onde o CSV é gravado |
+| `LEITOR_CB_ZOOMS` | `2.0,3.0` | Ampliações tentadas em ordem; a escalada para na primeira que achar algo aproveitável |
+| `LEITOR_CB_FORMATOS` | `ITF,Code128,QRCode` | Formatos procurados na página. Tirar um faz o boleto correspondente virar "nenhum código encontrado" |
+| `LEITOR_CB_HOST` | `127.0.0.1` | `0.0.0.0` dentro do contêiner (o `Dockerfile` já define); quem controla a exposição é a porta publicada |
+| `LEITOR_CB_PORTA` | `8000` | Porta do servidor |
+| `LEITOR_CB_DADOS` | `data` | Raiz dos dados: banco, uploads e — sem `LEITOR_CB_SAIDA` — os relatórios |
+| `LEITOR_CB_TAMANHO_MAXIMO_MB` | `25` | Teto por arquivo enviado |
+| `LEITOR_CB_MAXIMO_ARQUIVOS` | `50` | Teto de arquivos por envio |
+| `LEITOR_CB_TAMANHO_MAXIMO_ENVIO_MB` | `200` | Teto do envio inteiro, somando os arquivos. Cobrado antes de gravar qualquer coisa |
+| `LEITOR_CB_RETENCAO_HORAS` | `24` | Por quanto tempo os PDFs enviados ficam em disco |
+
+Valor inválido não derruba o servidor: cai no padrão, em silêncio. Se um ajuste
+parecer não ter efeito, confira a grafia.
 
 ## Implantação com Docker
 
@@ -98,32 +122,95 @@ docker compose logs -f         # acompanha
 docker compose down            # derruba
 ```
 
-O serviço volta sozinho depois de reinício do servidor (`restart: unless-stopped`)
-e responde em <http://127.0.0.1:8000> **na própria máquina**. Só a versão web
-roda no contêiner: a CLI abre a janela do OpenCV, que não existe ali.
+Confira que subiu:
 
-`./data` é montado para dentro do contêiner — é a única coisa que sobrevive a
-`docker compose down`. Ficam nela o histórico (`leitor_cb.sqlite3`), os CSVs em
-`output/` e os PDFs enviados em `uploads/`, estes últimos apagados pelo prazo de
-retenção.
-
-### Liberar para a rede do escritório
-
-Por padrão a porta é publicada em `127.0.0.1:8000`, então nenhuma outra máquina
-alcança o serviço. Para abrir, troque em `docker-compose.yml`:
-
-```yaml
-    ports:
-      - "8000:8000"
+```bash
+docker compose ps    # `leitor-cb` precisa aparecer "healthy"
 ```
 
-Não há login: quem chega na porta lê todos os boletos enviados e baixa os
-relatórios. Abra só numa rede em que isso seja aceitável.
+São dois contêineres: `leitor-cb`, o serviço, e `leitor-cb-autoheal`, que o
+vigia (veja abaixo).
+
+O serviço volta sozinho depois de reinício do servidor (`restart: unless-stopped`)
+e responde em `http://<ip-do-servidor>:8000`. Só a versão web roda no contêiner: a
+CLI abre a janela do OpenCV, que não existe ali.
+
+### O vigia, e o que ele custa
+
+`restart: unless-stopped` reage à *saída do processo*, não ao healthcheck —
+reiniciar contêiner doente é comportamento de Swarm e Kubernetes, não do Docker
+sozinho. Sem ninguém para agir, um uvicorn travado de pé (thread presa numa
+página, deadlock no pool) ficaria marcado `unhealthy` para sempre num servidor
+que ninguém observa. O `autoheal` fecha isso: a cada 30s reinicia quem estiver
+doente, e só olha contêiner com o rótulo `autoheal=true`.
+
+Ele monta o socket do Docker, e **isso equivale a dar root da máquina a esse
+contêiner** — é a troca que qualquer supervisão automática exige. Por isso a
+imagem está fixada em `willfarrell/autoheal:1.2.0`: um `latest` ali seria root do
+servidor mudando sozinho. Para dispensar o vigia, remova o serviço `autoheal` do
+`docker-compose.yml`; o resto continua funcionando, e o healthcheck volta a ser
+só diagnóstico manual.
+
+O reinício respeita os mesmos 5 minutos de tolerância do desligamento normal
+(`AUTOHEAL_STOP_TIMEOUT`), para não matar um lote grande no meio e trocar um
+contêiner travado por um registro preso em "processando".
+
+### Onde clonar: nunca numa pasta sincronizada
+
+O `./data` do servidor **não pode** estar dentro de OneDrive, SharePoint ou
+similar. O SQLite roda em modo WAL e depende de travas de arquivo funcionando —
+sobre uma pasta sincronizada, o banco corrompe. E todo boleto enviado e todo
+relatório iriam para a nuvem junto. Clone num caminho local do servidor
+(`/srv/leitor-cb`, `/opt/leitor-cb`).
+
+### A porta está aberta para a rede, e não há login
+
+O `docker-compose.yml` publica `"8000:8000"`, então **qualquer máquina da rede**
+que alcance a porta lê todos os boletos enviados, baixa todos os relatórios e
+pode descartar os PDFs de outra pessoa. Isso é decisão de implantação, não
+descuido — mas mantenha o serviço numa rede em que isso seja aceitável, e recue
+para `"127.0.0.1:8000:8000"` se deixar de ser.
+
+Sem login, o log de acesso do uvicorn é o único registro de quem baixou o quê.
+Ele sai no `docker compose logs`, com rotação em 10 arquivos de 10 MB. São 100 MB
+porque o que enche esse espaço não é o que interessa: a tela de progresso pede
+atualização a cada segundo enquanto o lote roda, e esse polling empurra para fora
+as poucas linhas de download de relatório que alguém procuraria meses depois.
 
 O botão **Copiar** funciona pela rede em HTTP: o navegador reserva a API moderna
 de área de transferência para endereços seguros, e fora deles o sistema cai no
 caminho antigo, que copia o campo selecionado. Se algum navegador do escritório
 recusar os dois, o botão avisa *tecle Ctrl+C* com o código já selecionado.
+
+### Backup
+
+O que precisa de cópia é `data/leitor_cb.sqlite3` (o histórico) e `data/output/`
+(os relatórios). Com o serviço no ar, **não** copie o `.sqlite3` com `cp`: em WAL
+a cópia sai inconsistente. Use o próprio SQLite, que sabe copiar a quente:
+
+```bash
+sqlite3 data/leitor_cb.sqlite3 ".backup /destino/leitor_cb.sqlite3"
+```
+
+Os PDFs em `data/uploads/` não precisam de backup — somem sozinhos em 24h por
+projeto, e o que importa deles já está no relatório.
+
+### Atualizar
+
+```bash
+sqlite3 data/leitor_cb.sqlite3 ".backup data/antes-da-atualizacao.sqlite3"
+docker compose up -d --build
+docker compose ps
+```
+
+O backup antes não é zelo excessivo: o esquema do banco se ajusta sozinho na
+subida (colunas novas são acrescentadas às tabelas existentes) e não há caminho
+de volta automático.
+
+Um lote que estiver sendo lido na hora da parada é encerrado como **falhou**, com
+o aviso para reenviar — a fila vive na memória do processo e não sobrevive à
+troca. O `stop_grace_period` de 5 minutos dá tempo para os lotes em andamento
+terminarem antes disso.
 
 ### Se der erro de permissão em `data/`
 
@@ -181,8 +268,10 @@ de pagar: quase sempre é leitura óptica errada.
 
 ## Configuração
 
-Copie `.env.example` para `.env` para mudar os padrões (pastas, zoom, formatos
-procurados). Os argumentos da linha de comando têm precedência sobre o `.env`.
+Crie um `.env` na raiz para mudar os padrões (pastas, zoom, formatos procurados).
+A lista completa está em [Variáveis de ambiente](#variáveis-de-ambiente). Os
+argumentos da linha de comando têm precedência sobre o `.env`, e o `.env` não é
+versionado nem entra na imagem do contêiner.
 
 ## Desenvolvimento
 

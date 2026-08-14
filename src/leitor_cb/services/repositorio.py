@@ -95,6 +95,8 @@ class RepositorioLotes(Protocol):
 
     def resumos_de(self, identificadores: Sequence[str]) -> dict[str, ResumoLote]: ...
 
+    def marcar_interrompidos(self, observacao: str) -> list[str]: ...
+
 
 class RepositorioSqlite:
     """Implementação em SQLite, um arquivo em `data/`.
@@ -305,6 +307,30 @@ class RepositorioSqlite:
             identificador: resumos.get(identificador, ResumoLote())
             for identificador in identificadores
         }
+
+    def marcar_interrompidos(self, observacao: str) -> list[str]:
+        """Fecha como falhos os lotes que ficaram no meio do caminho.
+
+        Só faz sentido na subida do servidor: a fila vive na memória do processo
+        (uma thread só), então um lote em `pendente` ou `processando` no banco de
+        um processo que acabou de nascer é resto de um encerramento abrupto —
+        queda de energia, reinício do servidor, morte por falta de memória. Sem
+        isto ele fica "processando" para sempre, e a tela pede o andamento a cada
+        segundo, eternamente, de um trabalho que ninguém mais está fazendo.
+        """
+        inacabados = (EstadoLote.PENDENTE.value, EstadoLote.PROCESSANDO.value)
+        with self._conectar() as conexao:
+            linhas = conexao.execute(
+                "SELECT id FROM lotes WHERE estado IN (?, ?)", inacabados
+            ).fetchall()
+            if not linhas:
+                return []
+
+            conexao.execute(
+                "UPDATE lotes SET estado = ?, observacao = ? WHERE estado IN (?, ?)",
+                (EstadoLote.FALHOU.value, observacao, *inacabados),
+            )
+        return [linha["id"] for linha in linhas]
 
 
 def _migrar(conexao: sqlite3.Connection) -> None:

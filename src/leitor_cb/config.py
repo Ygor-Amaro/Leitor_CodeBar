@@ -74,6 +74,16 @@ class ConfiguracaoWeb:
     formatos: str = FORMATOS_PADRAO
     tamanho_maximo_mb: int = 25
     maximo_de_arquivos: int = 50
+
+    tamanho_maximo_envio_mb: int = 200
+    """Teto do envio inteiro, somando todos os arquivos.
+
+    Não é `tamanho_maximo_mb * maximo_de_arquivos`: aquilo daria 1,25 GB gravados
+    em disco temporário antes de qualquer recusa, porque os tetos por arquivo só
+    são cobrados depois que o corpo já foi lido. Um lote real de boletos
+    digitalizados não passa de algumas dezenas de MB.
+    """
+
     envios_por_minuto: int = 20
     lotes_no_historico: int = 20
 
@@ -95,15 +105,17 @@ class ConfiguracaoWeb:
     def do_ambiente(cls) -> ConfiguracaoWeb:
         load_dotenv()
         base = Configuracao.do_ambiente()
+        dados = Path(os.getenv("LEITOR_CB_DADOS", "data"))
         return cls(
             host=os.getenv("LEITOR_CB_HOST", "127.0.0.1"),
             porta=_inteiro("LEITOR_CB_PORTA", 8000),
-            dados=Path(os.getenv("LEITOR_CB_DADOS", "data")),
-            saida=base.saida,
+            dados=dados,
+            saida=_saida_web(dados, base.saida),
             zooms=base.zooms,
             formatos=base.formatos,
             tamanho_maximo_mb=_inteiro("LEITOR_CB_TAMANHO_MAXIMO_MB", 25),
             maximo_de_arquivos=_inteiro("LEITOR_CB_MAXIMO_ARQUIVOS", 50),
+            tamanho_maximo_envio_mb=_inteiro("LEITOR_CB_TAMANHO_MAXIMO_ENVIO_MB", 200),
             retencao_horas=_inteiro("LEITOR_CB_RETENCAO_HORAS", 24),
         )
 
@@ -122,6 +134,24 @@ class ConfiguracaoWeb:
     @property
     def tamanho_maximo_bytes(self) -> int:
         return self.tamanho_maximo_mb * 1024 * 1024
+
+    @property
+    def tamanho_maximo_envio_bytes(self) -> int:
+        return self.tamanho_maximo_envio_mb * 1024 * 1024
+
+
+def _saida_web(dados: Path, saida_da_cli: Path) -> Path:
+    """Onde a web grava os CSVs.
+
+    Quem define `LEITOR_CB_SAIDA` manda. Sem ela, a saída acompanha
+    `LEITOR_CB_DADOS` em vez de cair no `data/output` relativo ao diretório de
+    trabalho: mudar só a raiz dos dados levava banco e uploads junto e deixava os
+    relatórios para trás — no contêiner, dentro da imagem em vez do volume, isto
+    é, perdidos no próximo `docker compose down`.
+    """
+    if os.getenv("LEITOR_CB_SAIDA") is not None:
+        return saida_da_cli
+    return dados / "output"
 
 
 def _inteiro(chave: str, padrao: int) -> int:

@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -24,8 +25,36 @@ from ...services.registro import Registrador, RegistradorJson
 from ...services.renderizador import RenderizadorPdf
 from ...services.repositorio import RepositorioSqlite
 from . import erros, paginas, rotas
-from .limites import LimitadorDeTaxa
+from .limites import LimitadorDeTaxa, LimiteDeCorpo
 from .visao import DIRETORIO_ESTATICOS, templates
+
+
+def _versao() -> str:
+    """Versão do pacote instalado.
+
+    Lida do metadado em vez de repetida aqui: a etiqueta da imagem, o
+    `pyproject.toml` e esta linha já divergiram uma vez, e é justo na hora de
+    voltar atrás numa atualização que a versão exibida precisa ser verdade.
+    """
+    try:
+        return version("leitor-cb")
+    except PackageNotFoundError:  # rodando do fonte, sem instalar
+        return "0.0.0"
+
+
+def _conferir_estaticos() -> None:
+    """Derruba a subida se o pacote veio sem os arquivos estáticos.
+
+    O `mount` aceita uma pasta vazia sem reclamar: as telas carregariam, mas sem
+    htmx não haveria barra de progresso, sem `relatorio.js` não haveria botão de
+    copiar e a tela de recorte não desenharia o retângulo. Uma falha muda dessas
+    é bem pior de diagnosticar às pressas do que um servidor que não sobe.
+    """
+    if not (DIRETORIO_ESTATICOS / "htmx.min.js").is_file():
+        raise RuntimeError(
+            f"Arquivos estáticos não encontrados em {DIRETORIO_ESTATICOS}. "
+            "O pacote foi instalado sem 'adapters/web/static'."
+        )
 
 
 def montar_servico(
@@ -79,6 +108,11 @@ def criar_app(
         # O processo passa dias desligado; a varredura na subida é o que faz o
         # prazo de retenção valer mesmo assim.
         servico.limpar_expirados()
+        # A fila vive na memória deste processo: lote em andamento no banco de um
+        # servidor que acabou de subir é resto de queda, e sem fechar aqui ele
+        # ficaria "processando" para sempre, com a tela pedindo o andamento a
+        # cada segundo.
+        servico.fechar_interrompidos()
         yield
         # Espera o lote em andamento: matar a thread no meio o deixaria
         # eternamente "processando" no banco.
@@ -87,8 +121,15 @@ def criar_app(
     app = FastAPI(
         title="Leitor CB",
         description="Leitura de códigos de barras FEBRABAN e QR Codes PIX em PDFs.",
-        version="0.3.0",
+        version=_versao(),
         lifespan=ciclo_de_vida,
+        # Sem /docs, /redoc e /openapi.json: o servidor fica aberto à rede do
+        # escritório sem login, e o Swagger é um mapa clicável de tudo — inclusive
+        # do DELETE que apaga os PDFs de outra pessoa. A tabela de endpoints do
+        # README é a documentação.
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
 
     app.state.configuracao = config
@@ -96,7 +137,17 @@ def criar_app(
     app.state.registrador = registrador
     app.state.limitador = LimitadorDeTaxa(maximo=config.envios_por_minuto)
 
-    DIRETORIO_ESTATICOS.mkdir(parents=True, exist_ok=True)
+    # Antes de tudo: corta o envio grande demais enquanto ele ainda é corpo de
+    # requisição, não arquivo em disco. O `responder` é injetado para o middleware
+    # não precisar importar `erros` — que importa `limites` — e para o formato da
+    # recusa continuar saindo do mesmo lugar que o dos outros erros.
+    app.add_middleware(
+        LimiteDeCorpo,
+        maximo_bytes=config.tamanho_maximo_envio_bytes,
+        responder=lambda request, erro: erros.resposta_de_erro(request, templates, erro),
+    )
+
+    _conferir_estaticos()
     app.mount("/estaticos", StaticFiles(directory=DIRETORIO_ESTATICOS), name="estaticos")
 
     erros.registrar_tratadores(app, templates, registrador)
