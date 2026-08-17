@@ -70,8 +70,10 @@ Para apagar antes, use **Descartar arquivos agora** na tela do lote.
 Descartar não afeta o relatório: o CSV continua disponível para download. O que
 se perde é a possibilidade de recortar aquelas páginas à mão.
 
-Existe também uma API REST, útil para automatizar o envio — documentação
-navegável em <http://127.0.0.1:8000/docs>:
+Existe também uma API REST, útil para automatizar o envio. A tabela abaixo é a
+documentação: o Swagger fica desligado de propósito (`docs_url=None`), porque a
+porta está aberta ao escritório sem login e ele seria um mapa clicável de todos
+os endpoints, inclusive o `DELETE`.
 
 | Rota | Para quê |
 | --- | --- |
@@ -99,26 +101,77 @@ docker compose down            # derruba
 ```
 
 O serviço volta sozinho depois de reinício do servidor (`restart: unless-stopped`)
-e responde em <http://127.0.0.1:8000> **na própria máquina**. Só a versão web
-roda no contêiner: a CLI abre a janela do OpenCV, que não existe ali.
+e responde em <http://leitor.administrativo.local> pela rede do escritório. Só a
+versão web roda no contêiner: a CLI abre a janela do OpenCV, que não existe ali.
 
 `./data` é montado para dentro do contêiner — é a única coisa que sobrevive a
 `docker compose down`. Ficam nela o histórico (`leitor_cb.sqlite3`), os CSVs em
 `output/` e os PDFs enviados em `uploads/`, estes últimos apagados pelo prazo de
 retenção.
 
-### Liberar para a rede do escritório
+### A URL do escritório
 
-Por padrão a porta é publicada em `127.0.0.1:8000`, então nenhuma outra máquina
-alcança o serviço. Para abrir, troque em `docker-compose.yml`:
+O serviço roda na `VM1-FIN-11N` (domínio `administrativo.local`) e é publicado na
+porta **80** do host — é o que faz a URL não carregar `:8000`:
 
 ```yaml
     ports:
-      - "8000:8000"
+      - "80:8000"
 ```
 
 Não há login: quem chega na porta lê todos os boletos enviados e baixa os
-relatórios. Abra só numa rede em que isso seja aceitável.
+relatórios. Está aberto porque a rede do escritório é aceitável para isso; para
+voltar a fechar, use `"127.0.0.1:8000:8000"`.
+
+> O contêiner ainda anuncia `http://127.0.0.1:8000` ao subir. É a visão de dentro
+> dele, onde a porta é mesmo a 8000; o mapeamento para a 80 do host é do compose,
+> e o processo não tem como saber dele. Use a URL abaixo.
+
+**O registro DNS.** No controlador de domínio (ou de uma máquina com o RSAT),
+como administrador do domínio:
+
+```powershell
+Add-DnsServerResourceRecordA -ComputerName 192.168.2.7 `
+  -ZoneName "administrativo.local" -Name "leitor" `
+  -IPv4Address "192.168.7.134" -CreatePtr
+```
+
+A partir daí o time acessa <http://leitor.administrativo.local>. A replicação
+entre os DCs (`192.168.2.7` e `192.168.2.6`) leva alguns minutos; em quem já
+consultou o nome antes, `ipconfig /flushdns` resolve.
+
+Dois cuidados que essa rede exige:
+
+- **O IP é DHCP.** `192.168.7.134` veio do servidor DHCP, e o registro A acima é
+  fixo — se a VM pegar outro endereço, o nome passa a apontar para o vazio.
+  Reserve o IP para o MAC da `VM1-FIN-11N` no DHCP antes de divulgar a URL.
+- **Não use CNAME para o nome da máquina.** É o que pareceria mais robusto, mas o
+  registro de `VM1-FIN-11N` tem **dois** endereços — `192.168.7.134` e
+  `192.168.240.1`, este último da placa virtual do WSL/Hyper-V, que nenhuma outra
+  máquina alcança. Um CNAME herdaria os dois e o serviço cairia de forma
+  intermitente. A causa se corrige na origem, e vale corrigir:
+
+  ```powershell
+  Set-DnsClient -InterfaceAlias "vEthernet (WSL (Hyper-V firewall))" `
+    -RegisterThisConnectionsAddress $false
+  ```
+
+**O firewall.** A porta 80 precisa ser liberada na máquina, como administrador:
+
+```powershell
+New-NetFirewallRule -DisplayName "Leitor CB (HTTP 80)" -Direction Inbound `
+  -Protocol TCP -LocalPort 80 -Action Allow -Profile Domain
+```
+
+`-Profile Domain` limita a regra à rede corporativa: numa eventual conexão a
+Wi-Fi de fora, a porta não acompanha.
+
+**O access log não identifica quem acessou.** O uvicorn registra cada requisição
+(`docker compose logs -f`), mas no Docker Desktop para Windows o encaminhamento
+de porta reescreve o endereço de origem: toda linha sai como `172.18.0.1`, o
+gateway da rede do contêiner. Serve para ver *o que* foi baixado e quando, não
+*por quem* — para isso seria preciso um proxy reverso à frente repassando o
+`X-Forwarded-For`. Vale saber antes de contar com o log numa apuração.
 
 O botão **Copiar** funciona pela rede em HTTP: o navegador reserva a API moderna
 de área de transferência para endereços seguros, e fora deles o sistema cai no
