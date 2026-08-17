@@ -19,11 +19,12 @@ services:
       autoheal: "true"
 
     ports:
-      # Publicado para a rede do escritório inteira, por decisão explícita: não há
-      # login, então qualquer máquina que alcance esta porta lê todos os boletos
-      # enviados, baixa todos os relatórios e pode descartar os PDFs de outra
-      # pessoa. Para recuar, volte a "127.0.0.1:8000:8000".
-      - "8000:8000"
+      # Publicado na rede do escritório: a partir daqui qualquer um que alcance
+      # esta máquina lê os boletos e pode descartar os PDFs de outra pessoa —
+      # não há login. Foi decisão consciente, para o time chegar pelo nome DNS
+      # (leitor.administrativo.local). Porta 80 no host para a URL não carregar
+      # ":8000"; para voltar a fechar, use "127.0.0.1:8000:8000".
+      - "80:8000"
 
     volumes:
       # Bind mount, não volume nomeado: o time precisa alcançar os CSVs de

@@ -71,10 +71,10 @@ Para apagar antes, use **Descartar arquivos agora** na tela do lote.
 Descartar não afeta o relatório: o CSV continua disponível para download. O que
 se perde é a possibilidade de recortar aquelas páginas à mão.
 
-Existe também uma API REST, útil para automatizar o envio. O `/docs` navegável
-está desligado de propósito — com o servidor aberto à rede e sem login, ele seria
-um mapa clicável de tudo o que está abaixo, inclusive do `DELETE`. Esta tabela é
-a documentação:
+Existe também uma API REST, útil para automatizar o envio. A tabela abaixo é a
+documentação: o Swagger fica desligado de propósito (`docs_url=None`), porque a
+porta está aberta ao escritório sem login e ele seria um mapa clicável de todos
+os endpoints, inclusive o `DELETE`.
 
 | Rota | Para quê |
 | --- | --- |
@@ -122,60 +122,78 @@ docker compose logs -f         # acompanha
 docker compose down            # derruba
 ```
 
-Confira que subiu:
+O serviço volta sozinho depois de reinício do servidor (`restart: unless-stopped`)
+e responde em <http://leitor.administrativo.local> pela rede do escritório. Só a
+versão web roda no contêiner: a CLI abre a janela do OpenCV, que não existe ali.
 
-```bash
-docker compose ps    # `leitor-cb` precisa aparecer "healthy"
+`./data` é montado para dentro do contêiner — é a única coisa que sobrevive a
+`docker compose down`. Ficam nela o histórico (`leitor_cb.sqlite3`), os CSVs em
+`output/` e os PDFs enviados em `uploads/`, estes últimos apagados pelo prazo de
+retenção.
+
+### A URL do escritório
+
+O serviço roda na `VM1-FIN-11N` (domínio `administrativo.local`) e é publicado na
+porta **80** do host — é o que faz a URL não carregar `:8000`:
+
+```yaml
+    ports:
+      - "80:8000"
 ```
 
-São dois contêineres: `leitor-cb`, o serviço, e `leitor-cb-autoheal`, que o
-vigia (veja abaixo).
+Não há login: quem chega na porta lê todos os boletos enviados e baixa os
+relatórios. Está aberto porque a rede do escritório é aceitável para isso; para
+voltar a fechar, use `"127.0.0.1:8000:8000"`.
 
-O serviço volta sozinho depois de reinício do servidor (`restart: unless-stopped`)
-e responde em `http://<ip-do-servidor>:8000`. Só a versão web roda no contêiner: a
-CLI abre a janela do OpenCV, que não existe ali.
+> O contêiner ainda anuncia `http://127.0.0.1:8000` ao subir. É a visão de dentro
+> dele, onde a porta é mesmo a 8000; o mapeamento para a 80 do host é do compose,
+> e o processo não tem como saber dele. Use a URL abaixo.
 
-### O vigia, e o que ele custa
+**O registro DNS.** No controlador de domínio (ou de uma máquina com o RSAT),
+como administrador do domínio:
 
-`restart: unless-stopped` reage à *saída do processo*, não ao healthcheck —
-reiniciar contêiner doente é comportamento de Swarm e Kubernetes, não do Docker
-sozinho. Sem ninguém para agir, um uvicorn travado de pé (thread presa numa
-página, deadlock no pool) ficaria marcado `unhealthy` para sempre num servidor
-que ninguém observa. O `autoheal` fecha isso: a cada 30s reinicia quem estiver
-doente, e só olha contêiner com o rótulo `autoheal=true`.
+```powershell
+Add-DnsServerResourceRecordA -ComputerName 192.168.2.7 `
+  -ZoneName "administrativo.local" -Name "leitor" `
+  -IPv4Address "192.168.7.134" -CreatePtr
+```
 
-Ele monta o socket do Docker, e **isso equivale a dar root da máquina a esse
-contêiner** — é a troca que qualquer supervisão automática exige. Por isso a
-imagem está fixada em `willfarrell/autoheal:1.2.0`: um `latest` ali seria root do
-servidor mudando sozinho. Para dispensar o vigia, remova o serviço `autoheal` do
-`docker-compose.yml`; o resto continua funcionando, e o healthcheck volta a ser
-só diagnóstico manual.
+A partir daí o time acessa <http://leitor.administrativo.local>. A replicação
+entre os DCs (`192.168.2.7` e `192.168.2.6`) leva alguns minutos; em quem já
+consultou o nome antes, `ipconfig /flushdns` resolve.
 
-O reinício respeita os mesmos 5 minutos de tolerância do desligamento normal
-(`AUTOHEAL_STOP_TIMEOUT`), para não matar um lote grande no meio e trocar um
-contêiner travado por um registro preso em "processando".
+Dois cuidados que essa rede exige:
 
-### Onde clonar: nunca numa pasta sincronizada
+- **O IP é DHCP.** `192.168.7.134` veio do servidor DHCP, e o registro A acima é
+  fixo — se a VM pegar outro endereço, o nome passa a apontar para o vazio.
+  Reserve o IP para o MAC da `VM1-FIN-11N` no DHCP antes de divulgar a URL.
+- **Não use CNAME para o nome da máquina.** É o que pareceria mais robusto, mas o
+  registro de `VM1-FIN-11N` tem **dois** endereços — `192.168.7.134` e
+  `192.168.240.1`, este último da placa virtual do WSL/Hyper-V, que nenhuma outra
+  máquina alcança. Um CNAME herdaria os dois e o serviço cairia de forma
+  intermitente. A causa se corrige na origem, e vale corrigir:
 
-O `./data` do servidor **não pode** estar dentro de OneDrive, SharePoint ou
-similar. O SQLite roda em modo WAL e depende de travas de arquivo funcionando —
-sobre uma pasta sincronizada, o banco corrompe. E todo boleto enviado e todo
-relatório iriam para a nuvem junto. Clone num caminho local do servidor
-(`/srv/leitor-cb`, `/opt/leitor-cb`).
+  ```powershell
+  Set-DnsClient -InterfaceAlias "vEthernet (WSL (Hyper-V firewall))" `
+    -RegisterThisConnectionsAddress $false
+  ```
 
-### A porta está aberta para a rede, e não há login
+**O firewall.** A porta 80 precisa ser liberada na máquina, como administrador:
 
-O `docker-compose.yml` publica `"8000:8000"`, então **qualquer máquina da rede**
-que alcance a porta lê todos os boletos enviados, baixa todos os relatórios e
-pode descartar os PDFs de outra pessoa. Isso é decisão de implantação, não
-descuido — mas mantenha o serviço numa rede em que isso seja aceitável, e recue
-para `"127.0.0.1:8000:8000"` se deixar de ser.
+```powershell
+New-NetFirewallRule -DisplayName "Leitor CB (HTTP 80)" -Direction Inbound `
+  -Protocol TCP -LocalPort 80 -Action Allow -Profile Domain
+```
 
-Sem login, o log de acesso do uvicorn é o único registro de quem baixou o quê.
-Ele sai no `docker compose logs`, com rotação em 10 arquivos de 10 MB. São 100 MB
-porque o que enche esse espaço não é o que interessa: a tela de progresso pede
-atualização a cada segundo enquanto o lote roda, e esse polling empurra para fora
-as poucas linhas de download de relatório que alguém procuraria meses depois.
+`-Profile Domain` limita a regra à rede corporativa: numa eventual conexão a
+Wi-Fi de fora, a porta não acompanha.
+
+**O access log não identifica quem acessou.** O uvicorn registra cada requisição
+(`docker compose logs -f`), mas no Docker Desktop para Windows o encaminhamento
+de porta reescreve o endereço de origem: toda linha sai como `172.18.0.1`, o
+gateway da rede do contêiner. Serve para ver *o que* foi baixado e quando, não
+*por quem* — para isso seria preciso um proxy reverso à frente repassando o
+`X-Forwarded-For`. Vale saber antes de contar com o log numa apuração.
 
 O botão **Copiar** funciona pela rede em HTTP: o navegador reserva a API moderna
 de área de transferência para endereços seguros, e fora deles o sistema cai no
