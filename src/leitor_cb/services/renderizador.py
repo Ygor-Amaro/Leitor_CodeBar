@@ -12,6 +12,21 @@ import numpy as np
 
 from ..domain.excecoes import DocumentoIlegivelError
 
+PIXELS_MAXIMOS = 80_000_000
+"""Teto da imagem rasterizada, em pixels.
+
+O zoom sozinho não limita nada: o tamanho de saída é o da página *vezes* o zoom, e
+o formato PDF admite página de 14400 pontos. Um arquivo de 522 bytes com essa
+medida pede 2,3 GB no zoom 2.0 da varredura automática e 37 GB no zoom 8 — e o
+`ascontiguousarray` abaixo faz uma segunda cópia, dobrando o pico. Sem este teto,
+meio quilobyte enviado por qualquer um da rede derruba o servidor por falta de
+memória, antes mesmo de alguém pedir a imagem.
+
+80 Mpx cabe A3 inteiro no zoom 8 (o maior da tela de recorte), que é bem mais do
+que um boleto precisa. Acima disso o documento vira pendência explícita, no mesmo
+caminho de qualquer outra página que não deu para ler.
+"""
+
 
 class DocumentoRenderizado(Protocol):
     """Documento aberto, capaz de rasterizar uma página sob demanda."""
@@ -47,8 +62,13 @@ class DocumentoPdf:
         O zoom é o que decide se um código mal digitalizado será legível — daí
         ele ser parâmetro, e não constante como no script antigo.
         """
+        alvo = self._documento[pagina]
+        # Conferido antes do `get_pixmap`: depois já seria a alocação que se quer
+        # evitar. A conta é a do PyMuPDF — medida da página vezes o zoom.
+        _conferir_tamanho(alvo.rect.width * zoom, alvo.rect.height * zoom, pagina)
+
         matriz = fitz.Matrix(zoom, zoom)
-        pix = self._documento[pagina].get_pixmap(matrix=matriz)
+        pix = alvo.get_pixmap(matrix=matriz)
 
         imagem = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
 
@@ -61,6 +81,17 @@ class DocumentoPdf:
 
         # O buffer precisa ser contíguo para atravessar a fronteira com o C++.
         return np.ascontiguousarray(convertida)
+
+
+def _conferir_tamanho(largura: float, altura: float, pagina: int) -> None:
+    """Barra a página que, no zoom pedido, viraria uma imagem grande demais."""
+    pixels = int(largura) * int(altura)
+    if pixels > PIXELS_MAXIMOS:
+        raise DocumentoIlegivelError(
+            f"A página {pagina + 1} ficaria com {pixels / 1_000_000:.0f} milhões de "
+            f"pixels neste zoom, acima do limite de {PIXELS_MAXIMOS // 1_000_000} "
+            "milhões. Reduza o zoom ou envie a página num formato menor."
+        )
 
 
 class RenderizadorPdf:

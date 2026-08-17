@@ -1,10 +1,13 @@
 """Rotas HTTP — API JSON e telas HTMX — sem PDF de verdade e sem thread."""
 
-from collections.abc import Callable
-from concurrent.futures import Executor, Future
-
 import pytest
-from conftest import PDF_FALSO, ProcessadorFalso, leitura_boleto, leitura_sem_codigo
+from conftest import (
+    PDF_FALSO,
+    ExecutorParado,
+    ProcessadorFalso,
+    leitura_boleto,
+    leitura_sem_codigo,
+)
 from fastapi.testclient import TestClient
 
 from leitor_cb.adapters.api.app import criar_app
@@ -19,17 +22,6 @@ from leitor_cb.services import (
 )
 
 HTMX = {"HX-Request": "true"}
-
-
-class ExecutorParado(Executor):
-    """Aceita o job e não roda nada — deixa o lote parado em 'na fila'.
-
-    É como se testa a tela de progresso: com o executor imediato o lote já
-    nasceria concluído e o estado intermediário nunca apareceria.
-    """
-
-    def submit(self, fn: Callable, /, *args, **kwargs) -> Future:  # type: ignore[override]
-        return Future()
 
 
 def montar(tmp_path, executor, processador=None, **ajustes) -> TestClient:
