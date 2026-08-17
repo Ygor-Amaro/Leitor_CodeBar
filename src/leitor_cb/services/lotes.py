@@ -41,6 +41,15 @@ FabricaExportador = Callable[[str], Exportador]
 
 RETENCAO_PADRAO = timedelta(hours=24)
 
+OBSERVACAO_INTERROMPIDO = (
+    "O servidor foi reiniciado durante a leitura. Envie os arquivos novamente."
+)
+"""Explicação que aparece na tela do lote fechado por `fechar_interrompidos`.
+
+Diz o que fazer, não o que houve: o operador não tem como retomar de onde parou —
+a fila morreu com o processo — e reenviar é a única saída.
+"""
+
 ZOOM_RELEITURA_PADRAO = 2.0
 """Ampliação da releitura de página inteira quando nenhuma é pedida.
 
@@ -183,6 +192,20 @@ class ServicoLotes:
         if apagados:
             self._registrador.info("arquivos expirados descartados", lotes=len(apagados))
         return apagados
+
+    def fechar_interrompidos(self) -> list[str]:
+        """Encerra os lotes que o processo anterior deixou pela metade.
+
+        Chamado na subida, junto de `limpar_expirados`. A fila é do processo — um
+        lote em andamento no banco de um servidor que acabou de subir não tem
+        ninguém trabalhando nele, e ficaria "processando" até alguém mexer no
+        banco à mão. Marcado como falho, ele ao menos para de rodar a barra de
+        progresso e diz ao operador o que fazer.
+        """
+        fechados = self._repositorio.marcar_interrompidos(OBSERVACAO_INTERROMPIDO)
+        if fechados:
+            self._registrador.info("lotes interrompidos encerrados", lotes=len(fechados))
+        return fechados
 
     # ----------------------------------------------------------------- worker
 

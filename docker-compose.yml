@@ -10,6 +10,14 @@ services:
     # se alguém parou de propósito com `docker compose stop`.
     restart: unless-stopped
 
+    # `restart` reage à saída do processo, não ao HEALTHCHECK — reiniciar quem
+    # está `unhealthy` é comportamento de Swarm/Kubernetes, não do Engine. Sem
+    # este rótulo, um uvicorn travado de pé (thread presa numa página, deadlock
+    # no pool) ficaria marcado como doente para sempre e ninguém agiria. Quem lê
+    # o rótulo é o serviço `autoheal` lá embaixo.
+    labels:
+      autoheal: "true"
+
     ports:
       # Publicado na rede do escritório: a partir daqui qualquer um que alcance
       # esta máquina lê os boletos e pode descartar os PDFs de outra pessoa —
@@ -31,10 +39,113 @@ services:
       LEITOR_CB_RETENCAO_HORAS: "24"
       LEITOR_CB_TAMANHO_MAXIMO_MB: "25"
       LEITOR_CB_MAXIMO_ARQUIVOS: "50"
+      # O teto que de fato protege o disco, declarado junto dos outros dois
+      # porque sozinhos eles mentem: 25 × 50 sugere 1,25 GB, e o que vale é este.
+      # Os dois de cima só são cobrados depois que o corpo inteiro já foi lido e
+      # derramado em disco temporário; este o `LimiteDeCorpo` recusa antes disso.
+      # Repete o padrão do código de propósito — mudar um lá sem mudar aqui não
+      # altera nada em execução, e é essa a intenção.
+      LEITOR_CB_TAMANHO_MAXIMO_ENVIO_MB: "200"
+
+    # A porta está aberta para a rede do escritório sem login, então o que der
+    # para fechar de graça fica fechado. O processo já roda como `leitor`
+    # (uid 1000, criado no Dockerfile): isto tira o resto do caminho de escalada.
+    # `no-new-privileges` impede que um binário setuid dentro da imagem devolva
+    # root, e sem nenhuma capability o processo não abre socket cru nem mexe em
+    # dono de arquivo — nada que ele faça precisa disso: uvicorn escuta na 8000,
+    # acima das portas privilegiadas, e só escreve no bind mount de /app/data.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Teto de processos/threads. O serviço é um processo só, com o pool de um
+    # worker mais as threads internas do PyMuPDF e do OpenCV; 200 é folga larga
+    # e ainda impede que uma falha em laço leve o servidor junto.
+    pids_limit: 200
+
+    # `read_only: true` seria o passo seguinte, e está de fora de propósito: o
+    # Starlette derrama cada parte do multipart em /tmp acima de 1 MB, e o corpo
+    # admitido vai a 200 MB (`tamanho_maximo_envio_mb`). O tmpfs necessário sairia
+    # do mesmo `mem_limit` de 2g que a rasterização já disputa — RAM trocada por
+    # proteger um sistema de arquivos que o usuário sem privilégios não escreve.
+
+    # O encerramento espera o lote em andamento terminar (`ServicoLotes.encerrar`).
+    # Nos 10s padrão do Docker, um `compose down` no meio de um lote grande vira
+    # SIGKILL e deixa o registro preso — que é justamente o que a varredura de
+    # `fechar_interrompidos` existe para limpar depois.
+    stop_grace_period: 5m
 
     # Rasterizar página é caro em memória; o teto evita que um PDF enorme
     # engula o servidor inteiro, e a aplicação já lê um lote por vez.
-    deploy:
-      resources:
-        limits:
-          memory: 2g
+    # `mem_limit` e não `deploy.resources`: aquele é sintaxe de Swarm e depende da
+    # versão do Compose para valer. Confira com
+    # `docker inspect leitor-cb --format '{{.HostConfig.Memory}}'` — 0 significa
+    # sem teto.
+    mem_limit: 2g
+
+    # O servidor fica meses ligado e o json-file cresce sem limite até encher o
+    # disco — que é o mesmo disco do banco e dos relatórios.
+    #
+    # 10 arquivos, não 3: sem login, o access log do uvicorn é o único registro
+    # de quem baixou qual relatório de contas a pagar, e o teto anterior de 30 MB
+    # não foi escolhido pensando nisso. O que enche esse espaço não é o que
+    # interessa — `_painel.html` pede progresso a cada 1s enquanto o lote roda,
+    # e esse polling empurra para fora as poucas linhas de
+    # `GET /lotes/.../relatorio.csv` que alguém procuraria meses depois.
+    # 100 MB é o preço de conseguir responder essa pergunta.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+
+  # Reinicia quem estiver `unhealthy` — é o que faltava para o HEALTHCHECK do
+  # Dockerfile virar recuperação em vez de adjetivo no `docker ps`. Só olha
+  # contêiner com o rótulo `autoheal=true`, então não encosta em mais nada que
+  # rode neste servidor.
+  #
+  # O CUSTO É REAL: montar o socket do Docker dá a este contêiner controle total
+  # do daemon, o que equivale a root na máquina. É a troca que qualquer
+  # supervisão automática de contêiner exige, e é o motivo de a imagem estar
+  # fixada num patch (1.2.0) em vez de `latest` — aqui um `latest` seria root do
+  # servidor mudando sozinho. O socket vai read-write de propósito: reiniciar
+  # contêiner é uma escrita na API, e `:ro` faz o connect() falhar em boa parte
+  # dos kernels.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: leitor-cb-autoheal
+    restart: unless-stopped
+
+    environment:
+      TZ: America/Sao_Paulo
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "30"
+      # Não conta como doente enquanto o processo está subindo. O
+      # `--start-period=15s` do HEALTHCHECK já cobre isso; esta é a folga do lado
+      # de cá, para um boot lento (varredura de `limpar_expirados` e
+      # `fechar_interrompidos`) não virar um laço de reinícios.
+      AUTOHEAL_START_PERIOD: "60"
+      # Casa com o `stop_grace_period: 5m` do serviço. No padrão de 10s, um
+      # reinício automático no meio de um lote grande viraria SIGKILL — trocando
+      # um contêiner travado por um registro preso em `processando`, que é o
+      # problema que `fechar_interrompidos` limpa só no boot seguinte.
+      AUTOHEAL_STOP_TIMEOUT: "300"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    security_opt:
+      - no-new-privileges:true
+
+    # Sem `cap_drop: ALL` aqui, ao contrário do serviço: esta imagem roda como
+    # root e fala com o socket, e restringi-la trocaria um ganho pequeno pelo
+    # risco de a supervisão morrer calada — que é o pior estado possível dela.
+    mem_limit: 64m
+    pids_limit: 64
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"

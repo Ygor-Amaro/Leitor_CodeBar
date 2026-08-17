@@ -28,7 +28,7 @@ from ...services.lotes import (
     RelatorioIndisponivelError,
 )
 from ...services.registro import Registrador
-from .limites import EnvioExcessivoError
+from .limites import EnvioExcessivoError, EnvioGrandeDemaisError
 
 SITUACOES: tuple[tuple[type[LeitorCbError], int], ...] = (
     (ArquivoRejeitadoError, status.HTTP_400_BAD_REQUEST),
@@ -39,6 +39,7 @@ SITUACOES: tuple[tuple[type[LeitorCbError], int], ...] = (
     (RelatorioIndisponivelError, status.HTTP_409_CONFLICT),
     (ArquivosIndisponiveisError, status.HTTP_409_CONFLICT),
     (EnvioExcessivoError, status.HTTP_429_TOO_MANY_REQUESTS),
+    (EnvioGrandeDemaisError, status.HTTP_413_CONTENT_TOO_LARGE),
 )
 
 GENERICO = "Erro interno. Veja o log do servidor."
@@ -49,6 +50,19 @@ def codigo_de(erro: BaseException) -> int:
         if isinstance(erro, tipo):
             return codigo
     return status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+def resposta_de_erro(
+    request: Request, templates: Jinja2Templates, erro: LeitorCbError
+) -> Response:
+    """Monta a resposta de uma falha esperada fora do tratador.
+
+    Existe para o middleware de tamanho de corpo, que precisa recusar o envio
+    antes de a rota existir — e portanto antes de haver tratador de exceção no
+    caminho. Passa por aqui para que o código e o formato continuem saindo de um
+    lugar só.
+    """
+    return _responder(request, templates, codigo_de(erro), str(erro))
 
 
 def registrar_tratadores(

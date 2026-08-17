@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from conftest import (
     PDF_FALSO,
+    ExecutorParado,
     ProcessadorFalso,
     ProcessadorQuebrado,
     leitura_boleto,
@@ -373,3 +374,37 @@ def test_processador_recebe_o_caminho_gravado(tmp_path, executor):
     servico.criar([recebido("a.pdf")])
 
     assert [Path(caminho).name for caminho in processador.processados] == ["001.pdf"]
+
+
+# ------------------------------------------------- lotes deixados pela metade
+
+
+def test_fechar_interrompidos_encerra_o_lote_que_ficou_na_fila(tmp_path):
+    """O que sobra de um servidor derrubado no meio da leitura.
+
+    A fila mora na memória do processo: ninguém vai retomar esse lote, e sem
+    fechá-lo a tela pediria o andamento a cada segundo, para sempre.
+    """
+    servico = montar(tmp_path, ExecutorParado())
+    lote = servico.criar([recebido("boleto.pdf")])
+    assert servico.obter(lote.identificador).estado is EstadoLote.PENDENTE
+
+    fechados = servico.fechar_interrompidos()
+
+    assert fechados == [lote.identificador]
+    encerrado = servico.obter(lote.identificador)
+    assert encerrado.estado is EstadoLote.FALHOU
+    assert encerrado.terminado
+    assert "novamente" in encerrado.observacao
+
+
+def test_fechar_interrompidos_deixa_o_lote_concluido_em_paz(tmp_path, executor):
+    servico = montar(tmp_path, executor)
+    lote = servico.criar([recebido("boleto.pdf")])
+    csv_gerado = servico.obter(lote.identificador).nome_csv
+
+    assert servico.fechar_interrompidos() == []
+
+    intacto = servico.obter(lote.identificador)
+    assert intacto.estado is EstadoLote.CONCLUIDO
+    assert intacto.nome_csv == csv_gerado

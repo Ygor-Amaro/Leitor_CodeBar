@@ -32,6 +32,18 @@ roteador = APIRouter(
 )
 
 
+@roteador.get("/saude", summary="Responde se o processo está de pé")
+def saude() -> dict[str, str]:
+    """Alvo do HEALTHCHECK do contêiner.
+
+    Não toca no banco de propósito: a checagem roda a cada 30 s para sempre, e
+    apontá-la para `/api/lotes` faria cada rodada abrir duas conexões SQLite e
+    marcar o contêiner como doente numa disputa de trava passageira. Aqui, o que
+    se pergunta é só se o processo aceita requisição.
+    """
+    return {"status": "ok"}
+
+
 @roteador.post(
     "/lotes",
     response_model=LoteResposta,

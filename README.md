@@ -26,9 +26,10 @@ Abra <http://127.0.0.1:8000>, escolha os PDFs, acompanhe o progresso e baixe o
 CSV. Os lotes anteriores ficam listados na mesma página, com link para reabrir o
 relatório.
 
-O servidor escuta só em `127.0.0.1`: nada é publicado na rede do escritório. O
-histórico (situação dos lotes e as leituras) fica num SQLite em
-`data/leitor_cb.sqlite3`.
+Rodando assim, na sua máquina, o servidor escuta só em `127.0.0.1` e nada é
+publicado na rede. No servidor do escritório é diferente — veja
+[Implantação com Docker](#implantação-com-docker). O histórico (situação dos
+lotes e as leituras) fica num SQLite em `data/leitor_cb.sqlite3`.
 
 ### Copiando as linhas para o banco
 
@@ -84,10 +85,31 @@ os endpoints, inclusive o `DELETE`.
 | `GET .../documentos/{n}/paginas/{p}/imagem?zoom=2` | Página rasterizada em PNG |
 | `POST .../documentos/{n}/paginas/{p}/releitura?zoom=2` | Relê a página inteira; com corpo `{x, y, largura, altura, zoom}`, só a área marcada |
 | `DELETE /api/lotes/{id}/arquivos` | Descarta os PDFs antes do prazo |
+| `GET /api/saude` | Responde `{"status": "ok"}`; é o alvo do healthcheck do contêiner |
 
-Ajustes por variável de ambiente (ou `.env`): `LEITOR_CB_HOST`,
-`LEITOR_CB_PORTA`, `LEITOR_CB_DADOS`, `LEITOR_CB_TAMANHO_MAXIMO_MB`,
-`LEITOR_CB_MAXIMO_ARQUIVOS`, `LEITOR_CB_RETENCAO_HORAS`.
+### Variáveis de ambiente
+
+Valem para a CLI e para a web. Localmente saem de um `.env` na raiz (que não é
+versionado); no servidor, do `environment:` do `docker-compose.yml` mais o `ENV`
+do `Dockerfile` — o `.env` **não** entra na imagem. Argumentos da linha de
+comando têm precedência sobre todos.
+
+| Variável | Padrão | Para quê |
+| --- | --- | --- |
+| `LEITOR_CB_ENTRADA` | `data/input` | Pasta (ou PDF) de onde a CLI lê |
+| `LEITOR_CB_SAIDA` | `<LEITOR_CB_DADOS>/output` | Onde o CSV é gravado |
+| `LEITOR_CB_ZOOMS` | `2.0,3.0` | Ampliações tentadas em ordem; a escalada para na primeira que achar algo aproveitável |
+| `LEITOR_CB_FORMATOS` | `ITF,Code128,QRCode` | Formatos procurados na página. Tirar um faz o boleto correspondente virar "nenhum código encontrado" |
+| `LEITOR_CB_HOST` | `127.0.0.1` | `0.0.0.0` dentro do contêiner (o `Dockerfile` já define); quem controla a exposição é a porta publicada |
+| `LEITOR_CB_PORTA` | `8000` | Porta do servidor |
+| `LEITOR_CB_DADOS` | `data` | Raiz dos dados: banco, uploads e — sem `LEITOR_CB_SAIDA` — os relatórios |
+| `LEITOR_CB_TAMANHO_MAXIMO_MB` | `25` | Teto por arquivo enviado |
+| `LEITOR_CB_MAXIMO_ARQUIVOS` | `50` | Teto de arquivos por envio |
+| `LEITOR_CB_TAMANHO_MAXIMO_ENVIO_MB` | `200` | Teto do envio inteiro, somando os arquivos. Cobrado antes de gravar qualquer coisa |
+| `LEITOR_CB_RETENCAO_HORAS` | `24` | Por quanto tempo os PDFs enviados ficam em disco |
+
+Valor inválido não derruba o servidor: cai no padrão, em silêncio. Se um ajuste
+parecer não ter efeito, confira a grafia.
 
 ## Implantação com Docker
 
@@ -178,6 +200,36 @@ de área de transferência para endereços seguros, e fora deles o sistema cai n
 caminho antigo, que copia o campo selecionado. Se algum navegador do escritório
 recusar os dois, o botão avisa *tecle Ctrl+C* com o código já selecionado.
 
+### Backup
+
+O que precisa de cópia é `data/leitor_cb.sqlite3` (o histórico) e `data/output/`
+(os relatórios). Com o serviço no ar, **não** copie o `.sqlite3` com `cp`: em WAL
+a cópia sai inconsistente. Use o próprio SQLite, que sabe copiar a quente:
+
+```bash
+sqlite3 data/leitor_cb.sqlite3 ".backup /destino/leitor_cb.sqlite3"
+```
+
+Os PDFs em `data/uploads/` não precisam de backup — somem sozinhos em 24h por
+projeto, e o que importa deles já está no relatório.
+
+### Atualizar
+
+```bash
+sqlite3 data/leitor_cb.sqlite3 ".backup data/antes-da-atualizacao.sqlite3"
+docker compose up -d --build
+docker compose ps
+```
+
+O backup antes não é zelo excessivo: o esquema do banco se ajusta sozinho na
+subida (colunas novas são acrescentadas às tabelas existentes) e não há caminho
+de volta automático.
+
+Um lote que estiver sendo lido na hora da parada é encerrado como **falhou**, com
+o aviso para reenviar — a fila vive na memória do processo e não sobrevive à
+troca. O `stop_grace_period` de 5 minutos dá tempo para os lotes em andamento
+terminarem antes disso.
+
 ### Se der erro de permissão em `data/`
 
 O contêiner roda como usuário comum (UID 1000). Quando o dono da pasta no
@@ -234,8 +286,10 @@ de pagar: quase sempre é leitura óptica errada.
 
 ## Configuração
 
-Copie `.env.example` para `.env` para mudar os padrões (pastas, zoom, formatos
-procurados). Os argumentos da linha de comando têm precedência sobre o `.env`.
+Crie um `.env` na raiz para mudar os padrões (pastas, zoom, formatos procurados).
+A lista completa está em [Variáveis de ambiente](#variáveis-de-ambiente). Os
+argumentos da linha de comando têm precedência sobre o `.env`, e o `.env` não é
+versionado nem entra na imagem do contêiner.
 
 ## Desenvolvimento
 
