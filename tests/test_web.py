@@ -8,6 +8,7 @@ from conftest import PDF_FALSO, ProcessadorFalso, leitura_boleto, leitura_sem_co
 from fastapi.testclient import TestClient
 
 from leitor_cb.adapters.api.app import criar_app
+from leitor_cb.adapters.api.servidor import _endereco_navegavel
 from leitor_cb.config import ConfiguracaoWeb
 from leitor_cb.services import (
     ArmazenamentoEmDisco,
@@ -453,3 +454,19 @@ def test_envios_em_rajada_sao_barrados(tmp_path, executor):
         resposta = cliente.post("/api/lotes", files=envio())
 
         assert resposta.status_code == 429
+
+
+def test_endereco_navegavel_troca_o_curinga_de_escuta():
+    """`0.0.0.0` diz onde escutar; colado no navegador não conecta."""
+    assert _endereco_navegavel("0.0.0.0") == "127.0.0.1"  # noqa: S104
+    assert _endereco_navegavel("::") == "127.0.0.1"
+    assert _endereco_navegavel("192.168.0.10") == "192.168.0.10"
+
+
+@pytest.mark.parametrize("rota", ["/docs", "/redoc", "/openapi.json"])
+def test_swagger_nao_e_servido(cliente, rota):
+    """A porta está aberta ao escritório sem login; o mapa da API, não.
+
+    Já esteve ligado por engano uma vez — daí o teste, e não só o comentário.
+    """
+    assert cliente.get(rota).status_code == 404
