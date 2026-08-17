@@ -89,6 +89,12 @@ def criar_app(
         description="Leitura de códigos de barras FEBRABAN e QR Codes PIX em PDFs.",
         version="0.3.0",
         lifespan=ciclo_de_vida,
+        # A porta está aberta à rede do escritório e não há login: o Swagger seria
+        # um mapa clicável de todos os endpoints, inclusive o DELETE que descarta
+        # os PDFs de outra pessoa. A tabela de endpoints do README documenta a API.
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
 
     app.state.configuracao = config
